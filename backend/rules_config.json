@@ -1,0 +1,36 @@
+{
+  "as_of_date": "2026-04-01",
+  "rule_version": "mvp-assumptions-v1",
+  "module_rule_versions": {
+    "search_orders": "retrieval-v1",
+    "get_production_output": "production-aggregation-v1",
+    "assess_order_risk": "risk-v1",
+    "assess_output_normality": "normality-v1",
+    "estimate_order_feasibility": "feasibility-v1",
+    "discover_operational_issues": "discovery-v1"
+  },
+  "priority_weights": {
+    "urgency": 0.4,
+    "impact": 0.3,
+    "anomaly": 0.2,
+    "spread": 0.1
+  },
+  "assumptions": {
+    "deadline_window_calendar_days": 7,
+    "stagnation_working_days": 5,
+    "output_drop_fraction": 0.35,
+    "output_drop_min_pieces": 1,
+    "normality_lookback_same_weekday": 4,
+    "normality_min_samples": 2,
+    "feasibility_safety_buffer_pct": 0.15,
+    "feasibility_lookback_working_days": 20,
+    "feasibility_min_history": 2,
+    "max_production_range_days": 366,
+    "brief_min_priority": 45,
+    "priority_critical": 80,
+    "priority_warning": 60,
+    "impact_scale_pieces": 1000,
+    "minimum_batch_is_inclusive": true
+  },
+  "assumption_notice": "Thresholds and scoring scales are MVP team assumptions, not official factory policy. Review with the team before operational use."
+}

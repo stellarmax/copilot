@@ -1,0 +1,5 @@
+order_id,customer,product,category,pieces,order_date,due_date,status,current_stage,last_activity_date,completed_date,days_late
+ORD-101,TrendCart,Hoodie,TOPS,800,2026-03-01,2026-04-04,IN_PROGRESS,KNITTING,2026-03-24,,
+ORD-102,TrendCart,Beanie,ACCESSORIES,300,2026-03-05,2026-04-05,IN_PROGRESS,PACKING,2026-03-30,,
+ORD-103,Maple & Co,Cardigan,TOPS,1200,2026-02-20,2026-04-20,IN_PROGRESS,ASSEMBLY,2026-03-31,,
+ORD-104,Maple & Co,Scarf,ACCESSORIES,200,2026-01-10,2026-03-31,COMPLETE,COMPLETE,2026-04-01,2026-04-01,1

@@ -1,0 +1,36 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Node / web build
+node_modules/
+frontend/dist/
+.vite/
+*.tsbuildinfo
+
+# Local data and secrets: never commit
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+.ai-credentials.key
+deploy.env
+.env
+*.local
+
+# Packaged hand-outs
+*.zip
+
+# OS, editor and Office temp files
+.DS_Store
+Thumbs.db
+desktop.ini
+~$*
+.vscode/
+.idea/
+
+# Course documents, reports and evaluation run logs: kept locally, not part of the runnable project
+instruction/
+setup_notes/
+DSS5105_Sprint_Review_Example.pdf
+evaluation/results/

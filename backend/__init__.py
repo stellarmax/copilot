@@ -1,0 +1,1 @@
+"""Backend core and HTTP API for the General Manager Co-Pilot."""

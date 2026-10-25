@@ -1,0 +1,8 @@
+# Normalise line endings so Windows and macOS teammates see identical files.
+* text=auto
+*.ps1 text eol=crlf
+*.sh text eol=lf
+*.png binary
+*.pdf binary
+*.pptx binary
+*.docx binary

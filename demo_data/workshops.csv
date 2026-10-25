@@ -1,0 +1,3 @@
+workshop_id,name,capacity_pieces_per_day,pickup_lead_days,defect_rate,cost_per_piece,makes,status,max_batch_pieces,current_queue_days,notes
+W1,Demo Active Shop,400,1,0.02,2.50,TOPS+ACCESSORIES,ACTIVE,1000,1.0,Synthetic demo record
+W2,Demo Suspended Shop,600,1,0.01,2.20,TOPS,SUSPENDED,,0.5,Synthetic demo record

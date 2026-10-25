@@ -1,0 +1,124 @@
+{
+  "_meta": {
+    "as_of_date": "2026-04-01",
+    "data_sha256": {
+      "orders.csv": "0880af9742fe7cc0923c5009e2de48a0bedb57b78cc294e35a1c9721fe0311f8",
+      "production_log.csv": "f67e505bd460ff62e788f371c7be58b22795a99b76ece5a43350b2d8b7372830",
+      "workshops.csv": "d7e1c97d3d338a2b5aef8e35f167e3582f22c4526e9c736c5b4c8125505ec59e"
+    },
+    "method": "Standard-library recomputation from data/*.csv; imports nothing from backend/."
+  },
+  "in_progress_count": 34,
+  "in_progress_pieces": 32850,
+  "trendcart_count": 17,
+  "trendcart_pieces": 15050,
+  "trendcart_active_count": 6,
+  "trendcart_active_pieces": 5600,
+  "trendcart_active_ids": [
+    "ORD-120",
+    "ORD-020",
+    "ORD-017",
+    "ORD-096",
+    "ORD-005",
+    "ORD-082"
+  ],
+  "northwind_active_count": 5,
+  "northwind_active_pieces": 8000,
+  "maple_active_ids": [
+    "ORD-083",
+    "ORD-093"
+  ],
+  "cotton_club_active_ids": [
+    "ORD-002",
+    "ORD-055",
+    "ORD-045",
+    "ORD-010"
+  ],
+  "ord058_status": "COMPLETE",
+  "ord058_pieces": 2000,
+  "ord058_days_late": 20,
+  "due_apr1_7_ids": [
+    "ORD-029",
+    "ORD-108",
+    "ORD-103",
+    "ORD-061",
+    "ORD-099"
+  ],
+  "assembly_0331": 455,
+  "stages_0331": {
+    "KNITTING": 905,
+    "ASSEMBLY": 455,
+    "WASHING": 732,
+    "PACKING": 657
+  },
+  "assembly_week_0323_0329": 3214,
+  "assembly_week_avg": 535.6667,
+  "knitting_march": 23288,
+  "packing_0328": 734,
+  "washing_0316_0321": 4069,
+  "assembly_0329_sunday": 0,
+  "ord029_risk": "HIGH",
+  "ord029_days_to_due": 0,
+  "ord108_risk": "HIGH",
+  "ord108_days_to_due": 2,
+  "assembly_0331_normality": {
+    "actual": 455,
+    "baseline": 748.0,
+    "baseline_dates": [
+      "2026-03-24",
+      "2026-03-17",
+      "2026-03-10",
+      "2026-03-03"
+    ],
+    "drop_fraction": 0.3917,
+    "status": "ABNORMAL"
+  },
+  "knitting_0330_normality": {
+    "actual": 829,
+    "baseline": 872.5,
+    "baseline_dates": [
+      "2026-03-23",
+      "2026-03-16",
+      "2026-03-09",
+      "2026-03-02"
+    ],
+    "drop_fraction": 0.0499,
+    "status": "NORMAL"
+  },
+  "brief_cluster_customers": [
+    "Bright Basics",
+    "Cotton Club",
+    "Harbor Knits",
+    "Maple & Co",
+    "Northwind Apparel",
+    "TrendCart"
+  ],
+  "brief_clusters": {
+    "TrendCart": [
+      "ORD-120",
+      "ORD-020"
+    ],
+    "Northwind Apparel": [
+      "ORD-107",
+      "ORD-114",
+      "ORD-099",
+      "ORD-029"
+    ],
+    "Cotton Club": [
+      "ORD-002",
+      "ORD-055"
+    ],
+    "Maple & Co": [
+      "ORD-083",
+      "ORD-093"
+    ],
+    "Bright Basics": [
+      "ORD-103",
+      "ORD-062"
+    ],
+    "Harbor Knits": [
+      "ORD-061",
+      "ORD-108"
+    ]
+  }
+}
