@@ -249,5 +249,5 @@ No. The project has no login, and the AI settings and chat endpoints accept loca
 
 - The app uses the **course-provided data** in `data/`, with the business date fixed at 2026-04-01.
 - All services listen only on this computer (`127.0.0.1`). Do not expose them to a LAN or the internet.
-- "Actions" are only recorded in the local database. They **never** send messages, create reminders or start watches.
-- The AI can only call read-only tools, and the backend calculates every number. Click **Evidence** at the end of an answer to see how a result was calculated.
+- The AI can **prepare** reminders, order notes and chase-up drafts, but nothing happens until you click **Confirm** on the card in the chat. Chase-up drafts are **never** actually sent, and reminders are shown in the app only (using your computer's real clock).
+- The backend calculates every number. Click **Evidence** at the end of an answer to see how a result was calculated.
