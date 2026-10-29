@@ -228,6 +228,11 @@ class CopilotCore:
             CREATE INDEX IF NOT EXISTS idx_reminders_status_time ON reminders(status, remind_at);
             """
         )
+        # Per-user ownership (added with login). Older databases get the column with owner 'local'.
+        for table in ("action_records", "reminders"):
+            columns = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
+            if "owner_id" not in columns:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'local'")
         self.conn.commit()
 
     def new_context(self) -> ReadContext:
@@ -1212,23 +1217,27 @@ class CopilotCore:
             due_state = "UPCOMING"
         return {key: row[key] for key in row.keys()} | {"due_state": due_state}
 
-    def _insert_reminder(self, order_id: str, note: str, remind_at: datetime, source: str, action_token: str | None) -> dict[str, Any]:
+    def _insert_reminder(self, order_id: str, note: str, remind_at: datetime, source: str, action_token: str | None,
+                         owner_id: str = "local") -> dict[str, Any]:
         now = iso_utc()
         reminder_id = f"REM-{secrets.token_hex(4).upper()}"
-        self.conn.execute("INSERT INTO reminders VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?)",
-                          (reminder_id, order_id, note, remind_at.isoformat(), source, action_token, now, now))
-        return self.get_reminder(reminder_id)
+        self.conn.execute(
+            """INSERT INTO reminders (reminder_id, order_id, note, remind_at, status, source, action_token,
+                                      created_at, updated_at, owner_id) VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?)""",
+            (reminder_id, order_id, note, remind_at.isoformat(), source, action_token, now, now, owner_id))
+        return self.get_reminder(reminder_id, owner_id)
 
-    def get_reminder(self, reminder_id: str) -> dict[str, Any] | None:
-        row = self.conn.execute("SELECT * FROM reminders WHERE reminder_id=?", (reminder_id,)).fetchone()
+    def get_reminder(self, reminder_id: str, owner_id: str = "local") -> dict[str, Any] | None:
+        row = self.conn.execute("SELECT * FROM reminders WHERE reminder_id=? AND owner_id=?", (reminder_id, owner_id)).fetchone()
         return self._reminder_view(row, datetime.now(timezone.utc)) if row else None
 
-    def list_reminders(self, include_closed: bool = False) -> list[dict[str, Any]]:
-        query = "SELECT * FROM reminders" + ("" if include_closed else " WHERE status='ACTIVE'") + " ORDER BY remind_at"
+    def list_reminders(self, include_closed: bool = False, owner_id: str = "local") -> list[dict[str, Any]]:
+        query = "SELECT * FROM reminders WHERE owner_id=?" + ("" if include_closed else " AND status='ACTIVE'") + " ORDER BY remind_at"
         now = datetime.now(timezone.utc)
-        return [self._reminder_view(row, now) for row in self.conn.execute(query).fetchall()]
+        return [self._reminder_view(row, now) for row in self.conn.execute(query, (owner_id,)).fetchall()]
 
-    def create_reminder(self, order_id: str, note: str, remind_at: str, requester: str = "web") -> dict[str, Any]:
+    def create_reminder(self, order_id: str, note: str, remind_at: str, requester: str = "web",
+                        owner_id: str = "local") -> dict[str, Any]:
         """Create a reminder directly (an explicit user form submission) and log it in the action ledger."""
         try:
             target = self._resolve_order_id(order_id)
@@ -1240,9 +1249,12 @@ class CopilotCore:
         now = iso_utc()
         payload = {"remind_at": moment.isoformat(), "message": text}
         preview = {"action_type": "create_reminder", "target": target, "payload": payload, "claim_ids": []}
-        self.conn.execute("INSERT INTO action_records VALUES (?, ?, 'create_reminder', ?, ?, '[]', 'CONFIRMED', ?, ?)",
-                          (token, requester, target, json.dumps(preview, ensure_ascii=False, sort_keys=True), now, now))
-        reminder = self._insert_reminder(target, text, moment, requester, token)
+        self.conn.execute(
+            """INSERT INTO action_records (token, requester, action_type, target, preview_json, claim_ids_json, status,
+                                           prepared_at, completed_at, owner_id)
+               VALUES (?, ?, 'create_reminder', ?, ?, '[]', 'CONFIRMED', ?, ?, ?)""",
+            (token, requester, target, json.dumps(preview, ensure_ascii=False, sort_keys=True), now, now, owner_id))
+        reminder = self._insert_reminder(target, text, moment, requester, token, owner_id)
         effect = {"action_type": "create_reminder", "target": target, "payload": payload,
                   "mode": "reminder_saved", "reminder_id": reminder["reminder_id"], "external_message_sent": False}
         self.conn.execute("INSERT INTO action_effects VALUES (?, 'create_reminder', ?, ?, ?)",
@@ -1250,8 +1262,8 @@ class CopilotCore:
         self.conn.commit()
         return {"status": "CREATED", "reminder": reminder}
 
-    def update_reminder(self, reminder_id: str, changes: dict[str, Any]) -> dict[str, Any]:
-        row = self.conn.execute("SELECT * FROM reminders WHERE reminder_id=?", (reminder_id,)).fetchone()
+    def update_reminder(self, reminder_id: str, changes: dict[str, Any], owner_id: str = "local") -> dict[str, Any]:
+        row = self.conn.execute("SELECT * FROM reminders WHERE reminder_id=? AND owner_id=?", (reminder_id, owner_id)).fetchone()
         if row is None:
             return {"status": "REFUSED", "error": {"code": "NOT_FOUND", "message": "Reminder was not found"}}
         try:
@@ -1273,15 +1285,15 @@ class CopilotCore:
             return {"status": "REFUSED", "error": {"code": exc.code, "message": str(exc)}}
         if fields:
             assignments = ", ".join(f"{key}=?" for key in fields)
-            self.conn.execute(f"UPDATE reminders SET {assignments}, updated_at=? WHERE reminder_id=?",
-                              (*fields.values(), iso_utc(), reminder_id))
+            self.conn.execute(f"UPDATE reminders SET {assignments}, updated_at=? WHERE reminder_id=? AND owner_id=?",
+                              (*fields.values(), iso_utc(), reminder_id, owner_id))
             self.conn.commit()
-        return {"status": "UPDATED", "reminder": self.get_reminder(reminder_id)}
+        return {"status": "UPDATED", "reminder": self.get_reminder(reminder_id, owner_id)}
 
     def manage_action(
         self, operation: str, requester: str, action_type: str | None = None,
         target: str | None = None, payload: dict[str, Any] | None = None,
-        claim_ids: list[str] | None = None, confirmation_token: str | None = None,
+        claim_ids: list[str] | None = None, confirmation_token: str | None = None, owner_id: str = "local",
     ) -> dict[str, Any]:
         operation = operation.upper()
         if operation == "PREPARE":
@@ -1323,9 +1335,12 @@ class CopilotCore:
                 token = secrets.token_urlsafe(24)
                 prepared_at = iso_utc()
                 preview = {"action_type": action_type, "target": order["order_id"], "payload": payload, "claim_ids": claim_ids}
-                self.conn.execute("INSERT INTO action_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
-                                  (token, requester.strip(), action_type, order["order_id"], json.dumps(preview, ensure_ascii=False, sort_keys=True),
-                                   json.dumps(claim_ids), "PREPARED", prepared_at))
+                self.conn.execute(
+                    """INSERT INTO action_records (token, requester, action_type, target, preview_json, claim_ids_json,
+                                                   status, prepared_at, completed_at, owner_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)""",
+                    (token, requester.strip(), action_type, order["order_id"], json.dumps(preview, ensure_ascii=False, sort_keys=True),
+                     json.dumps(claim_ids), "PREPARED", prepared_at, owner_id))
                 self.conn.commit()
                 return {"status": "PREPARED", "preview": preview, "confirmation_token": token, "prepared_at": prepared_at,
                         "side_effect_executed": False}
@@ -1335,7 +1350,9 @@ class CopilotCore:
             if not confirmation_token:
                 return {"status": "REFUSED", "error": {"code": "TOKEN_REQUIRED", "message": "confirmation_token is required"}}
             self.conn.execute("BEGIN IMMEDIATE")
-            row = self.conn.execute("SELECT * FROM action_records WHERE token=?", (confirmation_token,)).fetchone()
+            # Another user's token is treated exactly like an unknown one.
+            row = self.conn.execute("SELECT * FROM action_records WHERE token=? AND owner_id=?",
+                                    (confirmation_token, owner_id)).fetchone()
             if row is None or row["status"] != "PREPARED":
                 self.conn.rollback()
                 return {"status": "REFUSED", "error": {"code": "TOKEN_INVALID", "message": "Token is missing, expired, or already used"}}
@@ -1351,7 +1368,7 @@ class CopilotCore:
                 # Confirming a prepared reminder saves a real reminder, even if its time passed meanwhile.
                 reminder = self._insert_reminder(row["target"], preview["payload"]["message"],
                                                  datetime.fromisoformat(preview["payload"]["remind_at"]),
-                                                 row["requester"], confirmation_token)
+                                                 row["requester"], confirmation_token, owner_id)
                 effect.update({"mode": "reminder_saved", "reminder_id": reminder["reminder_id"]})
             self.conn.execute("INSERT INTO action_effects VALUES (?, ?, ?, ?, ?)",
                               (confirmation_token, row["action_type"], row["target"], json.dumps(effect, ensure_ascii=False, sort_keys=True), completed_at))
@@ -1362,8 +1379,9 @@ class CopilotCore:
                     else "local action ledger only; watch scheduling and message delivery are not connected", "confirmed_at": completed_at}
         return {"status": "REFUSED", "error": {"code": "INVALID_OPERATION", "message": "operation must be PREPARE, CONFIRM, or CANCEL"}}
 
-    def action_audit(self) -> list[dict[str, Any]]:
-        rows = self.conn.execute("SELECT a.*, e.effect_json FROM action_records a LEFT JOIN action_effects e ON e.token=a.token ORDER BY a.prepared_at").fetchall()
+    def action_audit(self, owner_id: str = "local") -> list[dict[str, Any]]:
+        rows = self.conn.execute("SELECT a.*, e.effect_json FROM action_records a LEFT JOIN action_effects e ON e.token=a.token "
+                                 "WHERE a.owner_id=? ORDER BY a.prepared_at", (owner_id,)).fetchall()
         return [{"requester": row["requester"], "action_type": row["action_type"], "target": row["target"],
                  "confirmation_token": row["token"],
                  "preview": json.loads(row["preview_json"]), "claim_ids": json.loads(row["claim_ids_json"]),

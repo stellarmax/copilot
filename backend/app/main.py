@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import os
-import ipaddress
+import re
 from collections.abc import Iterator
 from datetime import date
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 from backend.copilot import (
@@ -24,6 +24,14 @@ from backend.app.agent.security import CredentialEncryptionError
 from backend.app.agent.provider import PROVIDER_CATALOG
 from backend.app.agent.service import AgentService, AgentTurnError
 from backend.app.agent.store import AgentStore
+from backend.app.auth import (
+    LoginThrottle,
+    SessionMiddleware,
+    check_invite,
+    clear_session_cookie,
+    current_user,
+    set_session_cookie,
+)
 
 
 class StrictRequest(BaseModel):
@@ -81,6 +89,21 @@ class ReminderUpdateRequest(StrictRequest):
     note: str | None = Field(default=None, min_length=1, max_length=500)
     remind_at: str | None = Field(default=None, min_length=1, max_length=64)
     status: Literal["ACTIVE", "DONE", "CANCELLED"] | None = None
+
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+class RegisterRequest(StrictRequest):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=8, max_length=200)
+    display_name: str = Field(default="", max_length=60)
+    invite_code: str | None = Field(default=None, max_length=200)
+
+
+class LoginRequest(StrictRequest):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=200)
 
 
 class ConversationCreateRequest(StrictRequest):
@@ -161,37 +184,6 @@ def get_agent_store(request: Request) -> Iterator[AgentStore]:
         store.close()
 
 
-def require_loopback(request: Request) -> None:
-    host = request.client.host if request.client else ""
-    try:
-        is_local = ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        is_local = False
-    if not is_local:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="AI settings and chat are restricted to localhost until authentication is implemented.",
-        )
-
-
-LOCAL_HOST_NAMES = {"127.0.0.1", "localhost", "[::1]"}
-
-
-def require_local_admin(request: Request) -> None:
-    """Changing the AI key must happen on the host computer itself.
-
-    Requests forwarded by a Cloudflare Tunnel also come from 127.0.0.1, so the client address alone
-    is not enough; the Host header shows whether the request was addressed to this machine.
-    """
-    require_loopback(request)
-    host = (request.headers.get("host") or "").rsplit(":", 1)[0].lower()
-    if host not in LOCAL_HOST_NAMES:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="AI provider settings can only be changed on the computer running the app (http://127.0.0.1:8000).",
-        )
-
-
 def create_app(
     data_dir: str | Path | None = None,
     db_path: str | Path | None = None,
@@ -211,6 +203,9 @@ def create_app(
     app.state.config_path = _configured_path(
         str(config_path) if config_path is not None else os.getenv("COPILOT_CONFIG_PATH"), DEFAULT_CONFIG_PATH
     )
+
+    app.state.login_throttle = LoginThrottle()
+    app.add_middleware(SessionMiddleware)
 
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:
@@ -340,58 +335,95 @@ def create_app(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result)
         return result
 
+    # ------------------------------------------------------------------ accounts
+    @app.post("/api/v1/auth/register", tags=["auth"])
+    def register(payload: RegisterRequest, request: Request, response: Response,
+                 store: AgentStore = Depends(get_agent_store)) -> dict[str, str]:
+        check_invite(request, payload.invite_code)
+        email = payload.email.strip().lower()
+        if not EMAIL_RE.match(email):
+            raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail="Enter a valid e-mail address.")
+        if store.find_user_by_email(email):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this e-mail already exists.")
+        user = store.create_user(email, payload.password, payload.display_name.strip() or email.split("@")[0])
+        set_session_cookie(response, request, store.create_session(user["user_id"]))
+        return user
+
+    @app.post("/api/v1/auth/login", tags=["auth"])
+    def login(payload: LoginRequest, request: Request, response: Response,
+              store: AgentStore = Depends(get_agent_store)) -> dict[str, str]:
+        email = payload.email.strip().lower()
+        throttle: LoginThrottle = request.app.state.login_throttle
+        throttle.check(email, request)
+        user = store.authenticate(email, payload.password)
+        if user is None:
+            throttle.record_failure(email, request)
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="E-mail or password is incorrect.")
+        throttle.reset(email, request)
+        set_session_cookie(response, request, store.create_session(user["user_id"]))
+        return user
+
+    @app.post("/api/v1/auth/logout", tags=["auth"])
+    def logout(request: Request, response: Response, store: AgentStore = Depends(get_agent_store)) -> dict[str, bool]:
+        store.delete_session(request.cookies.get("copilot_session"))
+        clear_session_cookie(response)
+        return {"signed_out": True}
+
+    @app.get("/api/v1/auth/me", tags=["auth"])
+    def me(request: Request) -> dict[str, str]:
+        return current_user(request)
+
+    # ------------------------------------------------------------------ per-user actions and reminders
     @app.post("/api/v1/actions", tags=["actions"])
     def prepare_action(
-        payload: ActionPrepareRequest, core: CopilotCore = Depends(get_core)
+        payload: ActionPrepareRequest, user: dict = Depends(current_user), core: CopilotCore = Depends(get_core)
     ) -> dict[str, Any]:
         return _action_result(
-            core.manage_action(
-                "PREPARE",
-                payload.requester,
-                payload.action_type,
-                payload.target,
-                payload.payload,
-                payload.claim_ids,
-            )
+            core.manage_action("PREPARE", payload.requester, payload.action_type, payload.target,
+                               payload.payload, payload.claim_ids, owner_id=user["user_id"])
         )
 
     @app.post("/api/v1/actions/{token}/confirm", tags=["actions"])
-    def confirm_action(token: str, core: CopilotCore = Depends(get_core)) -> dict[str, Any]:
-        return _action_result(core.manage_action("CONFIRM", "api", confirmation_token=token))
+    def confirm_action(token: str, user: dict = Depends(current_user), core: CopilotCore = Depends(get_core)) -> dict[str, Any]:
+        return _action_result(core.manage_action("CONFIRM", "api", confirmation_token=token, owner_id=user["user_id"]))
 
     @app.post("/api/v1/actions/{token}/cancel", tags=["actions"])
-    def cancel_action(token: str, core: CopilotCore = Depends(get_core)) -> dict[str, Any]:
-        return _action_result(core.manage_action("CANCEL", "api", confirmation_token=token))
+    def cancel_action(token: str, user: dict = Depends(current_user), core: CopilotCore = Depends(get_core)) -> dict[str, Any]:
+        return _action_result(core.manage_action("CANCEL", "api", confirmation_token=token, owner_id=user["user_id"]))
 
     @app.get("/api/v1/actions", tags=["actions"])
     def action_audit(
-        request: Request, core: CopilotCore = Depends(get_core)
+        request: Request, user: dict = Depends(current_user), core: CopilotCore = Depends(get_core)
     ) -> list[dict[str, Any]]:
         _reject_unknown_query(request, set())
-        return core.action_audit()
+        return core.action_audit(user["user_id"])
 
     @app.get("/api/v1/reminders", tags=["reminders"])
     def list_reminders(
-        request: Request, include_closed: bool = False, core: CopilotCore = Depends(get_core)
+        request: Request, include_closed: bool = False, user: dict = Depends(current_user),
+        core: CopilotCore = Depends(get_core),
     ) -> list[dict[str, Any]]:
         _reject_unknown_query(request, {"include_closed"})
-        return core.list_reminders(include_closed)
+        return core.list_reminders(include_closed, user["user_id"])
 
     @app.post("/api/v1/reminders", tags=["reminders"])
-    def create_reminder(payload: ReminderCreateRequest, core: CopilotCore = Depends(get_core)) -> dict[str, Any]:
-        return _action_result(core.create_reminder(payload.order_id, payload.note, payload.remind_at))
+    def create_reminder(payload: ReminderCreateRequest, user: dict = Depends(current_user),
+                        core: CopilotCore = Depends(get_core)) -> dict[str, Any]:
+        return _action_result(core.create_reminder(payload.order_id, payload.note, payload.remind_at, owner_id=user["user_id"]))
 
     @app.patch("/api/v1/reminders/{reminder_id}", tags=["reminders"])
     def update_reminder(
-        reminder_id: str, payload: ReminderUpdateRequest, core: CopilotCore = Depends(get_core)
+        reminder_id: str, payload: ReminderUpdateRequest, user: dict = Depends(current_user),
+        core: CopilotCore = Depends(get_core),
     ) -> dict[str, Any]:
-        return _action_result(core.update_reminder(reminder_id, payload.model_dump(exclude_none=True)))
+        return _action_result(core.update_reminder(reminder_id, payload.model_dump(exclude_none=True), user["user_id"]))
 
-    @app.get("/api/v1/settings/ai", tags=["ai-settings"], dependencies=[Depends(require_loopback)])
-    def get_ai_settings(store: AgentStore = Depends(get_agent_store)) -> dict[str, Any]:
-        return store.get_ai_settings()
+    # ------------------------------------------------------------------ per-user AI settings and memory
+    @app.get("/api/v1/settings/ai", tags=["ai-settings"])
+    def get_ai_settings(user: dict = Depends(current_user), store: AgentStore = Depends(get_agent_store)) -> dict[str, Any]:
+        return store.get_ai_settings(user["user_id"])
 
-    @app.get("/api/v1/settings/ai/catalog", tags=["ai-settings"], dependencies=[Depends(require_loopback)])
+    @app.get("/api/v1/settings/ai/catalog", tags=["ai-settings"])
     def get_ai_provider_catalog() -> dict[str, Any]:
         return {
             "providers": [
@@ -404,12 +436,12 @@ def create_app(
             ]
         }
 
-    @app.put("/api/v1/settings/ai", tags=["ai-settings"], dependencies=[Depends(require_local_admin)])
+    @app.put("/api/v1/settings/ai", tags=["ai-settings"])
     def put_ai_settings(
-        payload: AISettingsRequest, store: AgentStore = Depends(get_agent_store)
+        payload: AISettingsRequest, user: dict = Depends(current_user), store: AgentStore = Depends(get_agent_store)
     ) -> dict[str, Any]:
         api_key = payload.api_key.get_secret_value() if payload.api_key is not None else None
-        current = store.get_ai_settings()
+        current = store.get_ai_settings(user["user_id"])
         if api_key is None and current["has_api_key"] and current["provider"] != payload.provider:
             # A saved key belongs to its provider; never send one provider's key to another.
             label = PROVIDER_CATALOG[payload.provider]["label"]
@@ -419,90 +451,92 @@ def create_app(
             )
         try:
             base_url = PROVIDER_CATALOG[payload.provider]["base_url"]
-            return store.save_ai_settings(payload.provider, base_url, payload.model, api_key)
+            return store.save_ai_settings(user["user_id"], payload.provider, base_url, payload.model, api_key)
         except CredentialEncryptionError as exc:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
-    @app.post("/api/v1/settings/ai/test", tags=["ai-settings"], dependencies=[Depends(require_local_admin)])
-    async def test_ai_connection(store: AgentStore = Depends(get_agent_store)) -> dict[str, str]:
+    @app.post("/api/v1/settings/ai/test", tags=["ai-settings"])
+    async def test_ai_connection(user: dict = Depends(current_user), store: AgentStore = Depends(get_agent_store)) -> dict[str, str]:
         try:
-            await AgentService(store, None).test_connection()  # type: ignore[arg-type]
+            await AgentService(store, None, user["user_id"]).test_connection()  # type: ignore[arg-type]
         except AgentTurnError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
         return {"status": "ok", "message": "AI provider connection succeeded."}
 
-    @app.delete("/api/v1/settings/ai/credential", tags=["ai-settings"], dependencies=[Depends(require_local_admin)])
-    def delete_ai_credential(store: AgentStore = Depends(get_agent_store)) -> dict[str, Any]:
-        store.clear_api_key()
-        return store.get_ai_settings()
+    @app.delete("/api/v1/settings/ai/credential", tags=["ai-settings"])
+    def delete_ai_credential(user: dict = Depends(current_user), store: AgentStore = Depends(get_agent_store)) -> dict[str, Any]:
+        store.clear_api_key(user["user_id"])
+        return store.get_ai_settings(user["user_id"])
 
-    @app.get("/api/v1/settings/chat-memory", tags=["chat-settings"], dependencies=[Depends(require_loopback)])
-    def get_chat_memory_settings(store: AgentStore = Depends(get_agent_store)) -> dict[str, bool]:
-        return {"enabled": store.memory_enabled()}
+    @app.get("/api/v1/settings/chat-memory", tags=["chat-settings"])
+    def get_chat_memory_settings(user: dict = Depends(current_user), store: AgentStore = Depends(get_agent_store)) -> dict[str, bool]:
+        return {"enabled": store.memory_enabled(user["user_id"])}
 
-    @app.put("/api/v1/settings/chat-memory", tags=["chat-settings"], dependencies=[Depends(require_loopback)])
+    @app.put("/api/v1/settings/chat-memory", tags=["chat-settings"])
     def put_chat_memory_settings(
-        payload: ChatMemoryPreferenceRequest, store: AgentStore = Depends(get_agent_store)
+        payload: ChatMemoryPreferenceRequest, user: dict = Depends(current_user), store: AgentStore = Depends(get_agent_store)
     ) -> dict[str, bool]:
-        return {"enabled": store.set_memory_enabled(payload.enabled)}
+        return {"enabled": store.set_memory_enabled(payload.enabled, user["user_id"])}
 
-    @app.get("/api/v1/chat/memories", tags=["chat-memory"], dependencies=[Depends(require_loopback)])
-    def list_chat_memories(store: AgentStore = Depends(get_agent_store)) -> list[dict[str, str]]:
-        return store.list_memories()
+    @app.get("/api/v1/chat/memories", tags=["chat-memory"])
+    def list_chat_memories(user: dict = Depends(current_user), store: AgentStore = Depends(get_agent_store)) -> list[dict[str, str]]:
+        return store.list_memories(user["user_id"])
 
-    @app.post("/api/v1/chat/memories", tags=["chat-memory"], dependencies=[Depends(require_loopback)])
+    @app.post("/api/v1/chat/memories", tags=["chat-memory"])
     def create_chat_memory(
-        payload: ChatMemoryCreateRequest, store: AgentStore = Depends(get_agent_store)
+        payload: ChatMemoryCreateRequest, user: dict = Depends(current_user), store: AgentStore = Depends(get_agent_store)
     ) -> dict[str, str]:
-        if not store.memory_enabled():
+        if not store.memory_enabled(user["user_id"]):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Enable optional chat memory before saving a memory.",
             )
-        return store.add_memory(payload.content)
+        return store.add_memory(payload.content, user["user_id"])
 
-    @app.delete("/api/v1/chat/memories/{memory_id}", tags=["chat-memory"], dependencies=[Depends(require_loopback)])
-    def delete_chat_memory(memory_id: str, store: AgentStore = Depends(get_agent_store)) -> dict[str, bool]:
-        return {"deleted": store.delete_memory(memory_id)}
+    @app.delete("/api/v1/chat/memories/{memory_id}", tags=["chat-memory"])
+    def delete_chat_memory(memory_id: str, user: dict = Depends(current_user), store: AgentStore = Depends(get_agent_store)) -> dict[str, bool]:
+        return {"deleted": store.delete_memory(memory_id, user["user_id"])}
 
-    @app.delete("/api/v1/chat/memories", tags=["chat-memory"], dependencies=[Depends(require_loopback)])
-    def clear_chat_memories(store: AgentStore = Depends(get_agent_store)) -> dict[str, int]:
-        return {"deleted_count": store.clear_memories()}
+    @app.delete("/api/v1/chat/memories", tags=["chat-memory"])
+    def clear_chat_memories(user: dict = Depends(current_user), store: AgentStore = Depends(get_agent_store)) -> dict[str, int]:
+        return {"deleted_count": store.clear_memories(user["user_id"])}
 
-    @app.post("/api/v1/chat/conversations", tags=["chat"], dependencies=[Depends(require_loopback)])
+    # ------------------------------------------------------------------ per-user chat
+    @app.post("/api/v1/chat/conversations", tags=["chat"])
     def create_chat_conversation(
-        payload: ConversationCreateRequest, store: AgentStore = Depends(get_agent_store)
+        payload: ConversationCreateRequest, user: dict = Depends(current_user), store: AgentStore = Depends(get_agent_store)
     ) -> dict[str, str]:
-        return store.create_conversation(payload.title)
+        return store.create_conversation(payload.title, user["user_id"])
 
-    @app.get("/api/v1/chat/conversations", tags=["chat"], dependencies=[Depends(require_loopback)])
-    def list_chat_conversations(store: AgentStore = Depends(get_agent_store)) -> list[dict[str, Any]]:
-        return store.list_conversations()
+    @app.get("/api/v1/chat/conversations", tags=["chat"])
+    def list_chat_conversations(user: dict = Depends(current_user), store: AgentStore = Depends(get_agent_store)) -> list[dict[str, Any]]:
+        return store.list_conversations(user["user_id"])
 
-    @app.get("/api/v1/chat/conversations/{conversation_id}", tags=["chat"], dependencies=[Depends(require_loopback)])
+    @app.get("/api/v1/chat/conversations/{conversation_id}", tags=["chat"])
     def get_chat_conversation(
-        conversation_id: str, store: AgentStore = Depends(get_agent_store)
+        conversation_id: str, user: dict = Depends(current_user), store: AgentStore = Depends(get_agent_store)
     ) -> dict[str, Any]:
-        conversation = store.get_conversation(conversation_id)
+        conversation = store.get_conversation(conversation_id, user["user_id"])
         if conversation is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation was not found.")
         return conversation
 
-    @app.delete("/api/v1/chat/conversations/{conversation_id}", tags=["chat"], dependencies=[Depends(require_loopback)])
+    @app.delete("/api/v1/chat/conversations/{conversation_id}", tags=["chat"])
     def delete_chat_conversation(
-        conversation_id: str, store: AgentStore = Depends(get_agent_store)
+        conversation_id: str, user: dict = Depends(current_user), store: AgentStore = Depends(get_agent_store)
     ) -> dict[str, bool]:
-        return {"deleted": store.delete_conversation(conversation_id)}
+        return {"deleted": store.delete_conversation(conversation_id, user["user_id"])}
 
-    @app.post("/api/v1/chat/conversations/{conversation_id}/turns", tags=["chat"], dependencies=[Depends(require_loopback)])
+    @app.post("/api/v1/chat/conversations/{conversation_id}/turns", tags=["chat"])
     async def chat_turn(
         conversation_id: str,
         payload: ChatTurnRequest,
+        user: dict = Depends(current_user),
         core: CopilotCore = Depends(get_core),
         store: AgentStore = Depends(get_agent_store),
     ) -> dict[str, Any]:
         try:
-            return await AgentService(store, core).run_turn(conversation_id, payload.message)
+            return await AgentService(store, core, user["user_id"]).run_turn(conversation_id, payload.message)
         except AgentTurnError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 

@@ -181,7 +181,7 @@ The Orders, Production, Feasibility and other pages work without AI. The AI chat
    | Gemini (Google) | <https://aistudio.google.com/apikey> |
    | DeepSeek | <https://platform.deepseek.com/api_keys> |
 
-2. In the web app, click **AI settings** in the left sidebar.
+2. Open the web app. The first time, click **Create an account** and register with your e-mail and a password (at least 8 characters). No invite code is needed on your own computer. Then click **AI settings** in the left sidebar.
 3. Choose the **AI provider**, then a **Model**. Each provider's first model is the recommended default.
 4. Paste your key into **API key** and click **Save settings**.
 5. Click **Test connection**. *AI provider connection succeeded.* means it works.
@@ -242,7 +242,10 @@ No API key is saved yet. Follow step 4.
 Stop the backend, delete `backend/.frontend-demo.sqlite3`, and start the backend again. This clears action records, chats, AI settings and memories, so you'll need to enter your API key again.
 
 **Q12: Can teammates open the app on my computer over the LAN?**
-No. The project has no login, and the AI settings and chat endpoints accept local requests only. Everyone should run their own copy.
+Not by default: the servers listen on `127.0.0.1` only. To share one copy, follow the deployment guide (`docs/DEPLOY_CLOUDFLARE_ZH.md`): teammates then register with the invite code and each uses their own API key. Chats, reminders and the action log are private to each account.
+
+**Q13: I forgot my password.**
+There is no password reset. Register again with another e-mail, or delete `backend/.frontend-demo.sqlite3` to start fresh (see Q11).
 ---
 
 ## 6. Notes

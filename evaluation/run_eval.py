@@ -241,8 +241,14 @@ def action_count(db_path: Path) -> int:
             return 0
 
 
-async def run(questions: list[dict], facts: dict) -> list[dict]:
-    credentials = AgentStore(BACKEND_DIR / ".frontend-demo.sqlite3").get_provider_credentials()
+async def run(questions: list[dict], facts: dict, email: str | None = None) -> list[dict]:
+    source = AgentStore(BACKEND_DIR / ".frontend-demo.sqlite3")
+    try:
+        credentials = source.get_provider_credentials(source.key_owner(email))
+    except LookupError as exc:
+        raise SystemExit(str(exc))
+    finally:
+        source.close()
     if credentials is None:
         raise SystemExit("No AI provider key saved. Configure one in AI settings first.")
     tmp = Path(tempfile.mkdtemp(prefix="copilot-eval-"))
@@ -251,8 +257,8 @@ async def run(questions: list[dict], facts: dict) -> list[dict]:
     captured: list[dict] = []
     real_execute = service_module.execute_tool
 
-    def capturing_execute(core_arg, name, arguments):
-        result = real_execute(core_arg, name, arguments)
+    def capturing_execute(core_arg, name, arguments, owner_id="local"):
+        result = real_execute(core_arg, name, arguments, owner_id)
         captured.append({"name": name, "arguments": arguments, "result": result})
         return result
 
@@ -349,6 +355,7 @@ def main() -> None:
     parser.add_argument("--set", choices=["dev", "heldout", "all"], default="dev")
     parser.add_argument("--ids", help="comma-separated question IDs")
     parser.add_argument("--label", help="name for the result files")
+    parser.add_argument("--email", help="account whose saved AI key to use (needed when several accounts saved one)")
     args = parser.parse_args()
     facts = json.loads((HERE / "answer_key.json").read_text(encoding="utf-8"))
     questions = json.loads((HERE / "questions.json").read_text(encoding="utf-8"))["questions"]
@@ -357,7 +364,7 @@ def main() -> None:
         questions = [q for q in questions if q["id"] in wanted]
     elif args.set != "all":
         questions = [q for q in questions if q["set"] == args.set]
-    records, credentials = asyncio.run(run(questions, facts))
+    records, credentials = asyncio.run(run(questions, facts, args.email))
     summary = summarise(records)
     path = write_report(records, summary, credentials, args.label or (args.ids and "selected") or args.set)
     print("\n" + json.dumps(summary, indent=2))

@@ -60,7 +60,7 @@ export function AISettingsPage() {
     onSuccess: (data) => {
       queryClient.setQueryData(["ai-settings"], data);
       setApiKey("");
-      setNotice("AI settings saved. The API key is stored encrypted on this machine.");
+      setNotice("AI settings saved. Your API key is stored encrypted and only your account can use it.");
     },
   });
 
@@ -119,8 +119,8 @@ export function AISettingsPage() {
   return (
     <div className="page-stack ai-settings-page">
       <section className="page-intro">
-        <div><span className="eyebrow">LOCAL AGENT CONFIGURATION</span><p>Configure the model connection and decide whether this workspace may keep optional chat memory.</p></div>
-        <span className="local-only-tag"><ShieldCheck size={15} /> LOOPBACK ONLY</span>
+        <div><span className="eyebrow">YOUR AGENT CONFIGURATION</span><p>Connect your own AI provider key and decide whether the assistant may keep optional chat memory for you.</p></div>
+        <span className="local-only-tag"><ShieldCheck size={15} /> PRIVATE TO YOUR ACCOUNT</span>
       </section>
 
       <section className="panel ai-settings-panel">
@@ -231,7 +231,7 @@ export function AISettingsPage() {
             )}
           </div>
         )}
-        <div className="notice-strip"><span>!</span><p>Settings and memories are currently restricted to localhost. This app has no login yet; do not expose these endpoints to a shared or public network.</p></div>
+        <div className="notice-strip"><span>!</span><p>Each signed-in account has its own key and memories. Nobody else, including the person hosting this app, can use your key through the app.</p></div>
       </section>
     </div>
   );

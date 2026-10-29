@@ -236,6 +236,15 @@ export class ApiError extends Error {
   }
 }
 
+export interface User {
+  user_id: string;
+  email: string;
+  display_name: string;
+}
+
+/** Fired when the session has expired, so the app can return to the sign-in page. */
+export const SIGNED_OUT_EVENT = "copilot:signed-out";
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
@@ -249,6 +258,9 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
+    if (response.status === 401 && !path.startsWith("/api/v1/auth/")) {
+      window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+    }
     const detail = typeof payload === "object" && payload !== null && "detail" in payload
       ? (payload as { detail: unknown }).detail
       : payload;
@@ -271,6 +283,27 @@ function queryString(values: Record<string, string | number | undefined>): strin
   }
   const value = params.toString();
   return value ? `?${value}` : "";
+}
+
+export async function getCurrentUser(): Promise<User | null> {
+  try {
+    return await apiFetch<User>("/api/v1/auth/me");
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) return null;
+    throw error;
+  }
+}
+
+export function signIn(input: { email: string; password: string }) {
+  return apiFetch<User>("/api/v1/auth/login", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function register(input: { email: string; password: string; display_name: string; invite_code?: string }) {
+  return apiFetch<User>("/api/v1/auth/register", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function signOut() {
+  return apiFetch<{ signed_out: boolean }>("/api/v1/auth/logout", { method: "POST" });
 }
 
 export function getHealth() {

@@ -180,7 +180,7 @@ npm run dev
    | Gemini (Google) | <https://aistudio.google.com/apikey> |
    | DeepSeek | <https://platform.deepseek.com/api_keys> |
 
-2. 在网页左侧点 **AI settings**。
+2. 打开网页。第一次使用时点 **Create an account**，用邮箱和密码（至少 8 位）注册；在自己电脑上注册不需要邀请码。然后在网页左侧点 **AI settings**。
 3. **AI provider**：选择厂家；**Model**：选择模型（每家的第一个模型都是推荐的默认选项）。
 4. **API key**：粘贴你的 key，点 **Save settings**。
 5. 点 **Test connection**，显示 *AI provider connection succeeded.* 就成功了。
@@ -247,7 +247,10 @@ npm config set registry https://registry.npmmirror.com
 停止后端，删除 `backend/.frontend-demo.sqlite3`，再重新启动后端。这会清空动作记录、聊天记录、AI 设置和记忆，API key 需要重新填。
 
 **Q12：能不能让同学通过局域网访问我的电脑？**
-不支持。项目没有登录认证，AI 设置和聊天接口只允许本机访问。请每个人在自己电脑上运行。
+默认不行，服务只监听 `127.0.0.1`。如果想共用一份，请按部署指南（`docs/DEPLOY_CLOUDFLARE_ZH.md`）操作：同学用邀请码注册，各自填自己的 API key；聊天、提醒和动作记录按账号隔离。
+
+**Q13：忘记密码了怎么办？**
+目前没有找回密码功能。可以换一个邮箱重新注册，或者按 Q11 删除数据库重新开始。
 ---
 
 ## 6. 注意事项

@@ -117,7 +117,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         ).decode("ascii")
         self.store = AgentStore(self.db_path)
         self.store.save_ai_settings(
-            "chatgpt", "https://api.openai.com/v1", "gpt-4.1-mini", "fake-key"
+            "local", "chatgpt", "https://api.openai.com/v1", "gpt-4.1-mini", "fake-key"
         )
         self.core = CopilotCore(DEFAULT_DEMO_DATA_DIR, self.db_path, DEFAULT_CONFIG_PATH)
         self.conversation = self.store.create_conversation("Order question")
@@ -238,7 +238,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_request_store_connection_can_cross_worker_thread(self):
         with ThreadPoolExecutor(max_workers=1) as executor:
-            settings = executor.submit(self.store.get_ai_settings).result()
+            settings = executor.submit(self.store.get_ai_settings, "local").result()
         self.assertEqual(settings["model"], "gpt-4.1-mini")
 
     async def test_chat_api_runs_a_read_only_tool_turn(self):
@@ -253,6 +253,10 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         fake_provider = FakeProvider()
         with patch.object(AgentService, "provider", return_value=fake_provider):
             async with AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+                registered = await client.post(
+                    "/api/v1/auth/register", json={"email": "gm@example.com", "password": "long enough 1"}
+                )
+                self.assertEqual(registered.status_code, 200)
                 saved = await client.put(
                     "/api/v1/settings/ai",
                     json={
@@ -280,7 +284,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual([item["role"] for item in history.json()["messages"]], ["user", "assistant"])
 
-    async def test_non_loopback_cannot_access_ai_settings_or_chat(self):
+    async def test_signed_out_visitor_cannot_access_ai_settings_or_chat(self):
         data_dir = self.root / "remote-api-data"
         shutil.copytree(DEFAULT_DEMO_DATA_DIR, data_dir)
         app = create_app(
@@ -292,8 +296,8 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         async with AsyncClient(transport=transport, base_url="http://example.test") as client:
             settings = await client.get("/api/v1/settings/ai")
             conversations = await client.get("/api/v1/chat/conversations")
-        self.assertEqual(settings.status_code, 403)
-        self.assertEqual(conversations.status_code, 403)
+        self.assertEqual(settings.status_code, 401)
+        self.assertEqual(conversations.status_code, 401)
 
 
 if __name__ == "__main__":

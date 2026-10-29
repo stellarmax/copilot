@@ -2,15 +2,36 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import secrets
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from .security import decrypt_api_key, encrypt_api_key
+
+SESSION_DAYS = 14
+SCRYPT = {"n": 2 ** 14, "r": 8, "p": 1}
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, dklen=32, **SCRYPT)
+    return f"scrypt${SCRYPT['n']}${SCRYPT['r']}${SCRYPT['p']}${salt.hex()}${digest.hex()}"
+
+
+def check_password(password: str, stored: str) -> bool:
+    try:
+        _, n, r, p, salt, digest = stored.split("$")
+        candidate = hashlib.scrypt(password.encode("utf-8"), salt=bytes.fromhex(salt), dklen=32,
+                                   n=int(n), r=int(r), p=int(p))
+    except (ValueError, TypeError):
+        return False
+    return secrets.compare_digest(candidate.hex(), digest)
 
 
 def _timestamp() -> str:
@@ -31,8 +52,25 @@ class AgentStore:
     def _initialize(self) -> None:
         self.connection.executescript(
             """
-            CREATE TABLE IF NOT EXISTS ai_provider_settings (
-                settings_id TEXT PRIMARY KEY CHECK (settings_id = 'local'),
+            -- The single shared key of the pre-login version is dropped on upgrade: every user
+            -- now stores and pays for their own key.
+            DROP TABLE IF EXISTS ai_provider_settings;
+            CREATE TABLE IF NOT EXISTS users (
+                user_id TEXT PRIMARY KEY,
+                email TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                token_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS user_ai_settings (
+                owner_id TEXT PRIMARY KEY,
                 provider TEXT NOT NULL,
                 base_url TEXT NOT NULL,
                 model TEXT NOT NULL,
@@ -75,9 +113,65 @@ class AgentStore:
         )
         self.connection.commit()
 
-    def get_ai_settings(self) -> dict[str, Any]:
+    # ------------------------------------------------------------------ users and sessions
+    def create_user(self, email: str, password: str, display_name: str) -> dict[str, str]:
+        user = {"user_id": str(uuid.uuid4()), "email": email, "display_name": display_name}
+        self.connection.execute(
+            "INSERT INTO users VALUES (?, ?, ?, ?, ?)",
+            (user["user_id"], email, display_name, hash_password(password), _timestamp()),
+        )
+        self.connection.commit()
+        return user
+
+    def authenticate(self, email: str, password: str) -> dict[str, str] | None:
+        row = self.connection.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+        if row is None:
+            check_password(password, hash_password("timing-equaliser"))  # same cost for unknown e-mails
+            return None
+        if not check_password(password, row["password_hash"]):
+            return None
+        return {"user_id": row["user_id"], "email": row["email"], "display_name": row["display_name"]}
+
+    def find_user_by_email(self, email: str) -> dict[str, str] | None:
+        row = self.connection.execute("SELECT user_id, email, display_name FROM users WHERE email=?", (email,)).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def _token_hash(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def create_session(self, user_id: str) -> str:
+        token = secrets.token_urlsafe(32)
+        now = datetime.now(timezone.utc)
+        self.connection.execute(
+            "INSERT INTO user_sessions VALUES (?, ?, ?, ?)",
+            (self._token_hash(token), user_id, now.isoformat(), (now + timedelta(days=SESSION_DAYS)).isoformat()),
+        )
+        self.connection.execute("DELETE FROM user_sessions WHERE expires_at < ?", (now.isoformat(),))
+        self.connection.commit()
+        return token
+
+    def session_user(self, token: str | None) -> dict[str, str] | None:
+        if not token:
+            return None
         row = self.connection.execute(
-            "SELECT * FROM ai_provider_settings WHERE settings_id='local'"
+            """SELECT u.user_id, u.email, u.display_name, s.expires_at FROM user_sessions s
+               JOIN users u USING (user_id) WHERE s.token_hash=?""",
+            (self._token_hash(token),),
+        ).fetchone()
+        if row is None or row["expires_at"] < datetime.now(timezone.utc).isoformat():
+            return None
+        return {"user_id": row["user_id"], "email": row["email"], "display_name": row["display_name"]}
+
+    def delete_session(self, token: str | None) -> None:
+        if token:
+            self.connection.execute("DELETE FROM user_sessions WHERE token_hash=?", (self._token_hash(token),))
+            self.connection.commit()
+
+    # ------------------------------------------------------------------ per-user AI settings
+    def get_ai_settings(self, owner_id: str) -> dict[str, Any]:
+        row = self.connection.execute(
+            "SELECT * FROM user_ai_settings WHERE owner_id=?", (owner_id,)
         ).fetchone()
         if row is None:
             return {
@@ -97,34 +191,35 @@ class AgentStore:
 
     def save_ai_settings(
         self,
+        owner_id: str,
         provider: str,
         base_url: str,
         model: str,
         api_key: str | None = None,
     ) -> dict[str, Any]:
         existing = self.connection.execute(
-            "SELECT api_key_ciphertext, api_key_nonce FROM ai_provider_settings WHERE settings_id='local'"
+            "SELECT api_key_ciphertext, api_key_nonce FROM user_ai_settings WHERE owner_id=?", (owner_id,)
         ).fetchone()
         ciphertext = existing["api_key_ciphertext"] if existing else None
         nonce = existing["api_key_nonce"] if existing else None
         if api_key is not None:
             ciphertext, nonce = encrypt_api_key(api_key)
         self.connection.execute(
-            """INSERT INTO ai_provider_settings
-               (settings_id, provider, base_url, model, api_key_ciphertext, api_key_nonce, updated_at)
-               VALUES ('local', ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(settings_id) DO UPDATE SET
+            """INSERT INTO user_ai_settings
+               (owner_id, provider, base_url, model, api_key_ciphertext, api_key_nonce, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(owner_id) DO UPDATE SET
                  provider=excluded.provider, base_url=excluded.base_url, model=excluded.model,
                  api_key_ciphertext=excluded.api_key_ciphertext, api_key_nonce=excluded.api_key_nonce,
                  updated_at=excluded.updated_at""",
-            (provider, base_url, model, ciphertext, nonce, _timestamp()),
+            (owner_id, provider, base_url, model, ciphertext, nonce, _timestamp()),
         )
         self.connection.commit()
-        return self.get_ai_settings()
+        return self.get_ai_settings(owner_id)
 
-    def get_provider_credentials(self) -> dict[str, str] | None:
+    def get_provider_credentials(self, owner_id: str) -> dict[str, str] | None:
         row = self.connection.execute(
-            "SELECT * FROM ai_provider_settings WHERE settings_id='local'"
+            "SELECT * FROM user_ai_settings WHERE owner_id=?", (owner_id,)
         ).fetchone()
         if row is None or row["api_key_ciphertext"] is None:
             return None
@@ -135,12 +230,26 @@ class AgentStore:
             "api_key": decrypt_api_key(row["api_key_ciphertext"], row["api_key_nonce"]),
         }
 
-    def clear_api_key(self) -> None:
+    def key_owner(self, email: str | None = None) -> str:
+        """Owner whose saved key a command-line script should use: by e-mail, or the only user with a key."""
+        if email:
+            user = self.find_user_by_email(email.strip().lower())
+            if user is None:
+                raise LookupError(f"No account for {email}.")
+            return user["user_id"]
+        owners = [row[0] for row in self.connection.execute(
+            "SELECT owner_id FROM user_ai_settings WHERE api_key_ciphertext IS NOT NULL")]
+        if len(owners) != 1:
+            raise LookupError("Pass --email: " + ("no account has saved an AI key." if not owners
+                                                  else "several accounts have saved AI keys."))
+        return owners[0]
+
+    def clear_api_key(self, owner_id: str) -> None:
         self.connection.execute(
-            """UPDATE ai_provider_settings
+            """UPDATE user_ai_settings
                SET api_key_ciphertext=NULL, api_key_nonce=NULL, updated_at=?
-               WHERE settings_id='local'""",
-            (_timestamp(),),
+               WHERE owner_id=?""",
+            (_timestamp(), owner_id),
         )
         self.connection.commit()
 

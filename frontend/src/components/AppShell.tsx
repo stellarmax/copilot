@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   Activity,
@@ -10,6 +10,7 @@ import {
   Factory,
   Info,
   Link2,
+  LogOut,
   Menu,
   ShieldCheck,
   Settings2,
@@ -17,7 +18,7 @@ import {
   RefreshCw,
   X,
 } from "lucide-react";
-import { getHealth } from "../lib/api";
+import { getHealth, signOut, type User } from "../lib/api";
 
 const navigation = [
   { to: "/", label: "Overview", icon: ChartNoAxesCombined, end: true },
@@ -35,15 +36,22 @@ const headings: Record<string, { title: string; kicker: string }> = {
   "/production": { title: "Production pulse", kicker: "STAGE PERFORMANCE" },
   "/feasibility": { title: "New order check", kicker: "CAPACITY PLANNING" },
   "/reminders": { title: "Reminders", kicker: "ORDER FOLLOW-UPS" },
-  "/audit": { title: "Action ledger", kicker: "LOCAL AUDIT TRAIL" },
+  "/audit": { title: "Action ledger", kicker: "YOUR AUDIT TRAIL" },
   "/settings": { title: "AI settings", kicker: "PROVIDER & MEMORY" },
 };
 
 interface AppShellProps {
+  user: User;
   children: React.ReactNode;
 }
 
-export function AppShell({ children }: AppShellProps) {
+function initials(user: User): string {
+  const words = (user.display_name || user.email.split("@")[0]).split(/[\s._-]+/).filter(Boolean);
+  return words.slice(0, 2).map((word) => word[0].toUpperCase()).join("") || "?";
+}
+
+export function AppShell({ user, children }: AppShellProps) {
+  const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [demoInfoOpen, setDemoInfoOpen] = useState(false);
@@ -88,6 +96,15 @@ export function AppShell({ children }: AppShellProps) {
     }
   }
 
+  async function handleSignOut() {
+    try {
+      await signOut();
+    } finally {
+      queryClient.clear();
+      queryClient.setQueryData(["me"], null);
+    }
+  }
+
   async function recheckConnection() {
     const result = await health.refetch();
     setMenuNotice(result.isError ? "API is offline." : "API connection is healthy.");
@@ -123,16 +140,16 @@ export function AppShell({ children }: AppShellProps) {
           <div className="sidebar-rule" />
           <div className="privacy-note"><ShieldCheck size={16} /><span>Track 1 course dataset<br /><small>No external actions enabled</small></span></div>
           <div className="user-stub">
-            <div className="avatar">GM</div>
-            <div><strong>Workspace user</strong><small>Local demo</small></div>
+            <div className="avatar">{initials(user)}</div>
+            <div className="user-identity"><strong>{user.display_name || user.email}</strong><small>{user.display_name ? user.email : "Signed in"}</small></div>
             <div className="user-menu-wrap" ref={profileMenuRef}>
               <button
                 className="user-menu-button"
                 type="button"
-                aria-label="Workspace user options"
+                aria-label="Account options"
                 aria-haspopup="menu"
                 aria-expanded={profileMenuOpen}
-                title="Workspace user options"
+                title="Account options"
                 onClick={() => {
                   setMenuNotice("");
                   setProfileMenuOpen((open) => !open);
@@ -141,7 +158,7 @@ export function AppShell({ children }: AppShellProps) {
                 <MoreHorizontal size={19} />
               </button>
               {profileMenuOpen && (
-                <div className="profile-menu" role="menu" aria-label="Workspace user options">
+                <div className="profile-menu" role="menu" aria-label="Account options">
                   <button ref={firstMenuItemRef} type="button" role="menuitem" onClick={copyPageLink}>
                     <Link2 size={15} /> Copy this page link
                   </button>
@@ -158,6 +175,9 @@ export function AppShell({ children }: AppShellProps) {
                     }}
                   >
                     <Info size={15} /> About this demo
+                  </button>
+                  <button type="button" role="menuitem" onClick={handleSignOut}>
+                    <LogOut size={15} /> Sign out
                   </button>
                   {menuNotice && <p className="profile-menu-notice" role="status">{menuNotice}</p>}
                 </div>
@@ -193,7 +213,7 @@ export function AppShell({ children }: AppShellProps) {
               <div className="demo-info-row"><span>Dataset</span><strong>Track 1 course dataset</strong></div>
               <div className="demo-info-row"><span>Workspace</span><strong>Factory workspace</strong></div>
               <div className="demo-info-row"><span>API status</span><strong className={health.isError ? "info-offline" : "info-online"}>{health.isError ? "Offline" : health.isLoading ? "Checking" : "Connected"}</strong></div>
-              <p>This demo has one fixed workspace. Sign-in, user profiles and workspace switching are not configured. Actions are recorded locally and are not sent externally.</p>
+              <p>Everyone shares the same read-only factory data. Your AI key, chats, memories, reminders and action log belong to your account only. Actions are recorded here and are never sent externally.</p>
             </div>
             <div className="dialog-actions"><button className="button button-primary" onClick={() => setDemoInfoOpen(false)}>Done</button></div>
           </section>

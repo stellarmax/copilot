@@ -15,7 +15,7 @@ An operations assistant for the general manager of SweaterCo, a sweater factory.
 | `data/` | Course-provided dataset (orders, production log, workshops); the app's default data |
 | `demo_data/` | Small fixture dataset used by the automated tests |
 | `evaluation/` | 36-question evaluation set, independent answer key, runner and failure analysis (run logs are generated locally) |
-| `docs/` | Local setup guides (EN/ZH) and deployment guide (Cloudflare Tunnel + Access) |
+| `docs/` | Local setup guides (EN/ZH) and deployment guides (Cloudflare Tunnel on your PC; Oracle Cloud VM) |
 | `scripts/` | Production start script |
 
 ## Run locally (development)
@@ -34,7 +34,7 @@ npm ci
 npm run dev
 ```
 
-Open <http://127.0.0.1:5173>. To use the AI chat, add your own API key under **AI settings**. It is stored encrypted in a local, git-ignored database.
+Open <http://127.0.0.1:5173> and create an account (no invite code is needed on the host computer). To use the AI chat, add your own API key under **AI settings**. Each account's key is stored encrypted in a local, git-ignored database and is used only for that account.
 
 ## Tests and evaluation
 
@@ -49,7 +49,7 @@ Results and the failure analysis are in `evaluation/EVALUATION_REPORT.md`.
 
 ## Deploy on your own domain
 
-The app runs on one computer and is published through **Cloudflare Tunnel**. **Cloudflare Access** restricts it to listed e-mail addresses, and the production server refuses requests without a valid Access login. See `docs/DEPLOY_CLOUDFLARE_ZH.md`.
+The app runs on one computer and is published through **Cloudflare Tunnel**. Everyone signs in with their own account; new accounts need the team invite code (`COPILOT_INVITE_CODE`), and each person uses their own AI key. Factory data is shared and read-only; chats, memories, reminders and the action log are private per account. Cloudflare Access can be added as an optional second gate. See `docs/DEPLOY_CLOUDFLARE_ZH.md`.
 
 ## Never committed
 

@@ -310,7 +310,7 @@ export function ChatPage({ onTrace }: { onTrace: (claimId: string) => void }) {
           ))}
           {conversations.data?.length === 0 && <p className="chat-history-empty">Your conversations will appear here.</p>}
         </div>
-        <div className="chat-history-foot"><ShieldCheck size={15} /><span>Local demo · Track 1 dataset<br /><small>Conversations stay on this machine.</small></span></div>
+        <div className="chat-history-foot"><ShieldCheck size={15} /><span>Track 1 dataset<br /><small>Only you can see your conversations.</small></span></div>
       </aside>
 
       <main className="chat-main">

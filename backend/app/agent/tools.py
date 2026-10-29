@@ -128,7 +128,7 @@ OPENAI_TOOLS = [
 ]
 
 
-def execute_tool(core: CopilotCore, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+def execute_tool(core: CopilotCore, name: str, arguments: dict[str, Any], owner_id: str = "local") -> dict[str, Any]:
     model = TOOL_MODELS.get(name)
     if model is None:
         raise ValueError("This tool is not allowed.")
@@ -164,7 +164,7 @@ def execute_tool(core: CopilotCore, name: str, arguments: dict[str, Any]) -> dic
                    "create_reminder": {"remind_at": values.get("remind_at"), "message": text},
                    "draft_chase_up_message": {"message": text}}[values["action_type"]]
         return core.manage_action("PREPARE", "assistant", values["action_type"], values["order_id"],
-                                  payload, values.get("claim_ids", []))
+                                  payload, values.get("claim_ids", []), owner_id=owner_id)
     raise ValueError("This tool is not allowed.")
 
 

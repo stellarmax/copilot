@@ -100,18 +100,19 @@ def _model_messages(
 
 
 class AgentService:
-    def __init__(self, store: AgentStore, core: CopilotCore) -> None:
+    def __init__(self, store: AgentStore, core: CopilotCore, owner_id: str = "local") -> None:
         self.store = store
         self.core = core
+        self.owner_id = owner_id
 
     def provider(self):
         try:
-            settings = self.store.get_provider_credentials()
+            settings = self.store.get_provider_credentials(self.owner_id)
         except ValueError as exc:
             raise AgentTurnError(str(exc), status_code=503) from exc
         if settings is None:
             raise AgentTurnError(
-                "AI is not configured. Open AI settings and add a provider API key.",
+                "AI is not configured for your account. Open AI settings and add your own provider API key.",
                 status_code=409,
             )
         if not settings["model"]:
@@ -135,13 +136,13 @@ class AgentService:
             raise AgentTurnError("Enter a message before sending.", status_code=422)
         if len(user_message) > 2000:
             raise AgentTurnError("Messages are limited to 2,000 characters.", status_code=422)
-        conversation = self.store.get_conversation(conversation_id)
+        conversation = self.store.get_conversation(conversation_id, self.owner_id)
         if conversation is None:
             raise AgentTurnError("Conversation was not found.", status_code=404)
 
         self.store.append_message(conversation_id, "user", user_message.strip())
-        conversation = self.store.get_conversation(conversation_id)
-        memories = self.store.list_memories() if self.store.memory_enabled() else []
+        conversation = self.store.get_conversation(conversation_id, self.owner_id)
+        memories = self.store.list_memories(self.owner_id) if self.store.memory_enabled(self.owner_id) else []
         business_date = getattr(self.core, "as_of_date", None)
         messages = _model_messages(
             conversation["messages"], memories, business_date.isoformat() if business_date else None
@@ -187,7 +188,7 @@ class AgentService:
                             if not isinstance(parsed, dict):
                                 raise ValueError("Tool arguments must be an object.")
                             parsed_arguments = parsed
-                            result = execute_tool(self.core, name, parsed_arguments)
+                            result = execute_tool(self.core, name, parsed_arguments, owner_id=self.owner_id)
                             model_result = trim_evidence(result)
                             if name == "prepare_action":
                                 result, model_result = self._prepared_action(result, pending_actions)

@@ -29,11 +29,20 @@ class BackendApiTests(IsolatedAsyncioTestCase):
             db_path=self.root / "api.sqlite3",
             config_path=ROOT / "backend" / "rules_config.json",
         )
-        transport = httpx.ASGITransport(app=app)
-        self.client = httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1")
+        self.app = app
+        self.clients = []
+        self.client = await self.signed_in_client("manager@example.com")
+
+    async def signed_in_client(self, email, password="correct horse 1"):
+        client = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://127.0.0.1")
+        self.clients.append(client)
+        registered = await client.post("/api/v1/auth/register", json={"email": email, "password": password})
+        self.assertEqual(registered.status_code, 200, registered.text)
+        return client
 
     async def asyncTearDown(self):
-        await self.client.aclose()
+        for client in self.clients:
+            await client.aclose()
         self.temp_dir.cleanup()
 
     async def test_health_search_and_claim_trace(self):
@@ -177,7 +186,7 @@ class BackendApiTests(IsolatedAsyncioTestCase):
 
             database = sqlite3.connect(self.root / "api.sqlite3")
             ciphertext = database.execute(
-                "SELECT api_key_ciphertext FROM ai_provider_settings"
+                "SELECT api_key_ciphertext FROM user_ai_settings"
             ).fetchone()[0]
             database.close()
             self.assertNotIn(b"sentinel-api-secret", ciphertext)
@@ -191,17 +200,71 @@ class BackendApiTests(IsolatedAsyncioTestCase):
             self.assertEqual(deleted.status_code, 200)
             self.assertFalse(deleted.json()["has_api_key"])
 
-    async def test_ai_key_changes_are_refused_through_a_tunnel(self):
-        # A tunnel forwards from 127.0.0.1 but keeps the public Host header.
-        public = {"host": "copilot.example.com"}
-        changed = await self.client.put(
-            "/api/v1/settings/ai", headers=public,
-            json={"provider": "chatgpt", "model": "gpt-4.1-mini", "api_key": "attacker-key"},
-        )
-        self.assertEqual(changed.status_code, 403)
-        self.assertEqual((await self.client.delete("/api/v1/settings/ai/credential", headers=public)).status_code, 403)
-        self.assertEqual((await self.client.post("/api/v1/settings/ai/test", headers=public)).status_code, 403)
-        self.assertEqual((await self.client.get("/api/v1/settings/ai", headers=public)).status_code, 200)
+    async def test_api_requires_sign_in(self):
+        anonymous = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://127.0.0.1")
+        self.clients.append(anonymous)
+        self.assertEqual((await anonymous.get("/health")).status_code, 200)
+        for path in ("/api/v1/orders", "/api/v1/settings/ai", "/api/v1/chat/conversations", "/api/v1/reminders"):
+            self.assertEqual((await anonymous.get(path)).status_code, 401, path)
+        self.assertEqual((await anonymous.get("/api/v1/auth/me")).status_code, 401)
+        self.assertEqual((await self.client.get("/api/v1/auth/me")).json()["email"], "manager@example.com")
+
+    async def test_login_logout_and_bad_passwords(self):
+        fresh = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://127.0.0.1")
+        self.clients.append(fresh)
+        wrong = await fresh.post("/api/v1/auth/login", json={"email": "manager@example.com", "password": "nope"})
+        self.assertEqual(wrong.status_code, 401)
+        ok = await fresh.post("/api/v1/auth/login", json={"email": "MANAGER@example.com ", "password": "correct horse 1"})
+        self.assertEqual(ok.status_code, 200)
+        cookie = ok.headers["set-cookie"].lower()
+        self.assertIn("httponly", cookie)
+        self.assertIn("samesite=lax", cookie)
+        self.assertEqual((await fresh.get("/api/v1/orders", params={"limit": 1})).status_code, 200)
+        await fresh.post("/api/v1/auth/logout")
+        self.assertEqual((await fresh.get("/api/v1/orders", params={"limit": 1})).status_code, 401)
+        duplicate = await fresh.post("/api/v1/auth/register", json={"email": "manager@example.com", "password": "whatever123"})
+        self.assertEqual(duplicate.status_code, 409)
+
+    async def test_repeated_failures_are_throttled(self):
+        fresh = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://127.0.0.1")
+        self.clients.append(fresh)
+        for _ in range(5):
+            await fresh.post("/api/v1/auth/login", json={"email": "manager@example.com", "password": "wrong-guess"})
+        blocked = await fresh.post("/api/v1/auth/login", json={"email": "manager@example.com", "password": "correct horse 1"})
+        self.assertEqual(blocked.status_code, 429)
+
+    async def test_registration_needs_invite_code_unless_local(self):
+        tunnel = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://copilot.example.com")
+        self.clients.append(tunnel)
+        body = {"email": "stranger@example.com", "password": "long enough 1"}
+        self.assertEqual((await tunnel.post("/api/v1/auth/register", json=body)).status_code, 403)
+        with patch.dict(os.environ, {"COPILOT_INVITE_CODE": "team-secret-16"}):
+            self.assertEqual((await tunnel.post("/api/v1/auth/register", json={**body, "invite_code": "guess"})).status_code, 403)
+            ok = await tunnel.post("/api/v1/auth/register", json={**body, "invite_code": "team-secret-16"})
+            self.assertEqual(ok.status_code, 200)
+
+    async def test_each_user_sees_only_their_own_key_chats_and_reminders(self):
+        from datetime import datetime, timedelta, timezone
+
+        encoded_key = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii")
+        other = await self.signed_in_client("teammate@example.com")
+        with patch.dict(os.environ, {"AI_CREDENTIALS_ENCRYPTION_KEY": encoded_key}):
+            await self.client.put("/api/v1/settings/ai", json={"provider": "chatgpt", "model": "gpt-4.1-mini", "api_key": "manager-key"})
+            self.assertTrue((await self.client.get("/api/v1/settings/ai")).json()["has_api_key"])
+            self.assertFalse((await other.get("/api/v1/settings/ai")).json()["has_api_key"])
+        conversation = (await self.client.post("/api/v1/chat/conversations", json={"title": "Private"})).json()
+        self.assertEqual((await other.get("/api/v1/chat/conversations")).json(), [])
+        self.assertEqual((await other.get(f"/api/v1/chat/conversations/{conversation['conversation_id']}")).status_code, 404)
+        when = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        reminder = (await self.client.post("/api/v1/reminders", json={"order_id": "ORD-101", "note": "Mine", "remind_at": when})).json()
+        self.assertEqual((await other.get("/api/v1/reminders")).json(), [])
+        stolen = await other.patch(f"/api/v1/reminders/{reminder['reminder']['reminder_id']}", json={"status": "CANCELLED"})
+        self.assertEqual(stolen.status_code, 404)
+        self.assertEqual((await other.get("/api/v1/actions")).json(), [])
+        prepared = (await self.client.post("/api/v1/actions", json={
+            "action_type": "add_order_note", "target": "ORD-101", "payload": {"note": "Check the knitting stage"}})).json()
+        self.assertEqual((await other.post(f"/api/v1/actions/{prepared['confirmation_token']}/confirm")).status_code, 409)
+        self.assertEqual((await self.client.post(f"/api/v1/actions/{prepared['confirmation_token']}/confirm")).status_code, 200)
 
     async def test_reminder_routes(self):
         from datetime import datetime, timedelta, timezone
