@@ -23,7 +23,7 @@ The VM never needs open inbound ports: `cloudflared` makes an outbound connectio
 3. **Image:** click *Change image* and pick **Canonical Ubuntu 24.04**.
 4. **Shape:** click *Change shape → Ampere → VM.Standard.A1.Flex*, with **1 OCPU and 6 GB memory**. This is inside the Always Free allowance, which is up to 4 OCPU and 24 GB in total.
    - If you get **"Out of capacity"**, try another *Availability domain* on the same page, or retry later. Always Free Ampere capacity is limited.
-   - The fallback is `VM.Standard.E2.1.Micro` (AMD, 1 GB RAM), which is also free. It is very tight on memory, so if you use it, follow the swap tip in Step 3.
+   - The fallback is `VM.Standard.E2.1.Micro` (AMD, 1 GB RAM), which is also free. 1 GB is enough to *run* the app. Follow the 1 GB notes in Steps 3 and 5, which build the web app on your laptop instead of on the VM.
 5. **Networking:** keep the default new VCN and public subnet, and keep *Assign a public IPv4 address* switched on. We only need it for SSH.
 6. **SSH keys:** choose *Generate a key pair for me* and **download the private key** (for example `ssh-key-copilot.key`). Store it safely. Without it you cannot log in.
 7. Click **Create**. When the state is **Running**, copy the **Public IP address**.
@@ -60,7 +60,11 @@ python3 --version   # needs 3.11 or newer (Ubuntu 24.04 ships 3.12)
 node --version      # needs v20 or newer
 ```
 
-**Only on the 1 GB Micro VM:** add swap so that `npm run build` doesn't run out of memory:
+**Only on the 1 GB Micro VM:**
+- Add swap as a safety margin.
+- You may skip installing Node.js entirely and build the web app on your laptop instead (see Step 5).
+
+The running app needs very little memory: the backend uses about 60 MB and `cloudflared` about 30 MB. Only `npm ci` and `npm run build` are memory-hungry.
 
 ```bash
 sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
@@ -97,7 +101,16 @@ cd frontend
 npm ci
 npm run build          # creates frontend/dist
 cd ..
+```
 
+> **1 GB Micro VM: build on your laptop instead.** Skip the `frontend` block above (and Node.js in Step 3). On your laptop, inside your own clone of the repo at the same commit, run `cd frontend`, `npm ci` and `npm run build`. Then upload the result:
+> ```bash
+> # on your laptop, from the repo root
+> scp -i <path-to>/ssh-key-copilot.key -r frontend/dist ubuntu@<PUBLIC_IP>:copilot/frontend/
+> ```
+> Do this again after every `git pull` that changes `frontend/`.
+
+```bash
 cp deploy.env.example deploy.env
 nano deploy.env        # set COPILOT_INVITE_CODE=<the team's code>; leave both CF_ACCESS_* lines empty
 chmod 600 deploy.env
@@ -178,7 +191,7 @@ From your phone on mobile data:
 cd ~/copilot
 git pull
 .venv/bin/pip install -r backend/requirements.txt
-(cd frontend && npm ci && npm run build)
+(cd frontend && npm ci && npm run build)   # 1 GB VM: build on your laptop and scp frontend/dist instead (Step 5)
 sudo systemctl restart copilot
 ```
 
