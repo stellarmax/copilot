@@ -13,29 +13,27 @@ import { ProductionPage } from "./features/ProductionPage";
 import { RemindersPage } from "./features/RemindersPage";
 import { SignInPage } from "./features/SignInPage";
 import { getCurrentUser, SIGNED_OUT_EVENT, type User } from "./lib/api";
+import { switchUser } from "./lib/session";
 
 export default function App() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const me = useQuery({ queryKey: ["me"], queryFn: getCurrentUser, retry: false, staleTime: Infinity });
 
   useEffect(() => {
     // Any 401 means the session is gone: drop every cached answer so the next user sees nothing of it.
-    const handleSignedOut = () => {
-      queryClient.clear();
-      queryClient.setQueryData(["me"], null);
-    };
+    const handleSignedOut = () => switchUser(queryClient, null);
     window.addEventListener(SIGNED_OUT_EVENT, handleSignedOut);
     return () => window.removeEventListener(SIGNED_OUT_EVENT, handleSignedOut);
   }, [queryClient]);
 
-  function handleSignedIn(user: User) {
-    queryClient.clear();
-    queryClient.setQueryData(["me"], user);
-  }
-
   if (me.isPending) return <div className="auth-page" aria-busy="true" />;
   if (me.isError) return <div className="auth-page"><p className="auth-loading-error">{me.error.message}</p></div>;
-  if (!me.data) return <SignInPage onSignedIn={handleSignedIn} />;
+  if (!me.data) return <SignInPage onSignedIn={(user, isNewAccount) => {
+    switchUser(queryClient, user);
+    // A new account has no AI key yet: start on AI settings with a welcome note.
+    if (isNewAccount) navigate("/settings", { state: { welcome: true } });
+  }} />;
   return <Workspace user={me.data} />;
 }
 

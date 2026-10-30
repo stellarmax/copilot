@@ -101,7 +101,7 @@ export function OverviewPage({ onTrace, onAsk }: OverviewPageProps) {
     <div className="overview-page page-stack">
       <section className="brief-banner">
         <div className="brief-banner-copy">
-          <div className="eyebrow light">TUESDAY, APRIL 01 <span>·</span> MORNING CHECK-IN</div>
+          <div className="eyebrow light">TUESDAY, APRIL 01 <span>·</span> DAILY CHECK-IN</div>
           <h2>Know where to<br /><em>look first.</em></h2>
           <p>Prioritized operational findings, backed by traceable data and deterministic rules.</p>
         </div>

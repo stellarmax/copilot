@@ -577,3 +577,5 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .auth-loading-error { color: #a94d3d; font-size: 14px; }
 .user-identity { min-width: 0; }
 .user-identity strong, .user-identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dialog-actions-split { gap: 8px; }
+.demo-info-body.auth-form { gap: 12px; padding: 16px 18px; }

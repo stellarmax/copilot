@@ -15,6 +15,11 @@ foreach ($line in Get-Content "deploy.env") {
     if ($line -match '^\s*([A-Z_]+)\s*=\s*(.+?)\s*$') { Set-Item -Path "Env:$($Matches[1])" -Value $Matches[2] }
 }
 
+if (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue) {
+    Write-Host "Port 8000 is already in use. Stop the development backend (or an earlier copy of this script) first." -ForegroundColor Red
+    exit 1
+}
+
 $python = Join-Path $root ".venv\Scripts\python.exe"
 if (-not (Test-Path $python)) {
     Write-Host "Creating the Python virtual environment..."
@@ -26,6 +31,7 @@ if (-not (Test-Path $python)) {
 Push-Location frontend
 if (-not (Test-Path "node_modules")) { npm.cmd ci }
 npm.cmd run build
+if ($LASTEXITCODE -ne 0) { Write-Host "The web app build failed; see the errors above." -ForegroundColor Red; Pop-Location; exit 1 }
 Pop-Location
 
 Write-Host "Serving on http://127.0.0.1:8000 (published through Cloudflare Tunnel; sign-in required)." -ForegroundColor Green

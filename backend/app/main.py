@@ -106,6 +106,10 @@ class LoginRequest(StrictRequest):
     password: str = Field(min_length=1, max_length=200)
 
 
+class ProfileRequest(StrictRequest):
+    display_name: str = Field(min_length=1, max_length=60)
+
+
 class ConversationCreateRequest(StrictRequest):
     title: str = Field(default="New conversation", min_length=1, max_length=100)
 
@@ -372,6 +376,15 @@ def create_app(
     @app.get("/api/v1/auth/me", tags=["auth"])
     def me(request: Request) -> dict[str, str]:
         return current_user(request)
+
+    @app.patch("/api/v1/auth/me", tags=["auth"])
+    def update_profile(payload: ProfileRequest, user: dict = Depends(current_user),
+                       store: AgentStore = Depends(get_agent_store)) -> dict[str, str]:
+        display_name = payload.display_name.strip()
+        if not display_name:
+            raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail="Enter a display name.")
+        store.update_display_name(user["user_id"], display_name)
+        return {**user, "display_name": display_name}
 
     # ------------------------------------------------------------------ per-user actions and reminders
     @app.post("/api/v1/actions", tags=["actions"])

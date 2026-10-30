@@ -4,7 +4,7 @@ import { KeyRound, LogIn, UserPlus } from "lucide-react";
 import { ErrorState } from "../components/Feedback";
 import { register, signIn, type User } from "../lib/api";
 
-export function SignInPage({ onSignedIn }: { onSignedIn: (user: User) => void }) {
+export function SignInPage({ onSignedIn }: { onSignedIn: (user: User, isNewAccount: boolean) => void }) {
   const [mode, setMode] = useState<"sign-in" | "register">("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -14,7 +14,7 @@ export function SignInPage({ onSignedIn }: { onSignedIn: (user: User) => void })
     mutationFn: () => mode === "sign-in"
       ? signIn({ email, password })
       : register({ email, password, display_name: displayName, invite_code: inviteCode || undefined }),
-    onSuccess: onSignedIn,
+    onSuccess: (user) => onSignedIn(user, mode === "register"),
   });
   const registering = mode === "register";
 

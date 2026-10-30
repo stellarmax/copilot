@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import { useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Eye, EyeOff, KeyRound, LockKeyhole, Plus, RefreshCw, ShieldCheck, Trash2, X } from "lucide-react";
 import { ErrorState, LoadingState } from "../components/Feedback";
@@ -33,6 +34,7 @@ export function AISettingsPage() {
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [memoryDraft, setMemoryDraft] = useState("");
+  const welcome = (useLocation().state as { welcome?: boolean } | null)?.welcome;
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
@@ -122,6 +124,12 @@ export function AISettingsPage() {
         <div><span className="eyebrow">YOUR AGENT CONFIGURATION</span><p>Connect your own AI provider key and decide whether the assistant may keep optional chat memory for you.</p></div>
         <span className="local-only-tag"><ShieldCheck size={15} /> PRIVATE TO YOUR ACCOUNT</span>
       </section>
+
+      {welcome && (
+        <div className="settings-notice" role="status">
+          <Check size={15} />Account created. Add your own AI provider API key below to start using the AI chat.
+        </div>
+      )}
 
       <section className="panel ai-settings-panel">
         <div className="panel-heading">

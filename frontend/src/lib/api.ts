@@ -302,6 +302,10 @@ export function register(input: { email: string; password: string; display_name:
   return apiFetch<User>("/api/v1/auth/register", { method: "POST", body: JSON.stringify(input) });
 }
 
+export function updateDisplayName(displayName: string) {
+  return apiFetch<User>("/api/v1/auth/me", { method: "PATCH", body: JSON.stringify({ display_name: displayName }) });
+}
+
 export function signOut() {
   return apiFetch<{ signed_out: boolean }>("/api/v1/auth/logout", { method: "POST" });
 }

@@ -225,6 +225,14 @@ class BackendApiTests(IsolatedAsyncioTestCase):
         duplicate = await fresh.post("/api/v1/auth/register", json={"email": "manager@example.com", "password": "whatever123"})
         self.assertEqual(duplicate.status_code, 409)
 
+    async def test_display_name_can_be_changed(self):
+        changed = await self.client.patch("/api/v1/auth/me", json={"display_name": "  Grace Ma "})
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(changed.json()["display_name"], "Grace Ma")
+        self.assertEqual((await self.client.get("/api/v1/auth/me")).json()["display_name"], "Grace Ma")
+        self.assertEqual((await self.client.patch("/api/v1/auth/me", json={"display_name": "   "})).status_code, 422)
+        self.assertEqual((await self.client.patch("/api/v1/auth/me", json={"display_name": "x" * 61})).status_code, 422)
+
     async def test_repeated_failures_are_throttled(self):
         fresh = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://127.0.0.1")
         self.clients.append(fresh)

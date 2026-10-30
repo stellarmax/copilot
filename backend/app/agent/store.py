@@ -123,6 +123,10 @@ class AgentStore:
         self.connection.commit()
         return user
 
+    def update_display_name(self, user_id: str, display_name: str) -> None:
+        self.connection.execute("UPDATE users SET display_name=? WHERE user_id=?", (display_name, user_id))
+        self.connection.commit()
+
     def authenticate(self, email: str, password: str) -> dict[str, str] | None:
         row = self.connection.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
         if row is None:

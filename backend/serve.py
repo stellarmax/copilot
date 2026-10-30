@@ -34,13 +34,18 @@ audience = os.getenv("CF_ACCESS_AUD", "")
 if team_domain and audience:
     app.add_middleware(CloudflareAccessMiddleware, verifier=AccessVerifier(team_domain, audience))
 
+# The interactive API docs are for local development only; do not publish them through the tunnel.
+DOC_PATHS = {app.docs_url, app.redoc_url, app.openapi_url, app.swagger_ui_oauth2_redirect_url}
+app.router.routes[:] = [route for route in app.router.routes if getattr(route, "path", None) not in DOC_PATHS]
+app.docs_url = app.redoc_url = app.openapi_url = None
+
 app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
 
 
 @app.get("/{path:path}", include_in_schema=False)
 def web_app(path: str) -> FileResponse:
     """Serve built files, and index.html for client-side routes such as /chat or /reminders."""
-    if path.startswith("api/"):
+    if path.startswith("api/") or "/" + path in DOC_PATHS:
         raise HTTPException(status_code=404, detail="Not Found")
     candidate = (DIST / path).resolve()
     if path and candidate.is_file() and DIST.resolve() in candidate.parents:

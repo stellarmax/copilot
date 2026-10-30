@@ -12,6 +12,7 @@ import {
   Link2,
   LogOut,
   Menu,
+  PenLine,
   ShieldCheck,
   Settings2,
   MoreHorizontal,
@@ -19,6 +20,9 @@ import {
   X,
 } from "lucide-react";
 import { getHealth, signOut, type User } from "../lib/api";
+import { greeting } from "../lib/greeting";
+import { switchUser } from "../lib/session";
+import { DisplayNameDialog } from "./DisplayNameDialog";
 
 const navigation = [
   { to: "/", label: "Overview", icon: ChartNoAxesCombined, end: true },
@@ -55,12 +59,15 @@ export function AppShell({ user, children }: AppShellProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [demoInfoOpen, setDemoInfoOpen] = useState(false);
+  const [nameDialogOpen, setNameDialogOpen] = useState(false);
   const [menuNotice, setMenuNotice] = useState("");
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const firstMenuItemRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
   const health = useQuery({ queryKey: ["health"], queryFn: getHealth, refetchInterval: 30_000 });
-  const page = headings[location.pathname] ?? headings["/"];
+  const heading = headings[location.pathname] ?? headings["/"];
+  // The Overview greets the signed-in user in place of its page title.
+  const page = heading === headings["/"] ? { ...heading, title: greeting(user.display_name) } : heading;
 
   useEffect(() => {
     if (profileMenuOpen) firstMenuItemRef.current?.focus();
@@ -100,8 +107,7 @@ export function AppShell({ user, children }: AppShellProps) {
     try {
       await signOut();
     } finally {
-      queryClient.clear();
-      queryClient.setQueryData(["me"], null);
+      switchUser(queryClient, null);
     }
   }
 
@@ -176,6 +182,16 @@ export function AppShell({ user, children }: AppShellProps) {
                   >
                     <Info size={15} /> About this demo
                   </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setProfileMenuOpen(false);
+                      setNameDialogOpen(true);
+                    }}
+                  >
+                    <PenLine size={15} /> Change display name
+                  </button>
                   <button type="button" role="menuitem" onClick={handleSignOut}>
                     <LogOut size={15} /> Sign out
                   </button>
@@ -202,6 +218,7 @@ export function AppShell({ user, children }: AppShellProps) {
         <div className="page-content">{children}</div>
         <footer className="app-footer"><span>FIELDWORK OPERATIONS</span><span>Decision support · not a delivery guarantee</span></footer>
       </main>
+      {nameDialogOpen && <DisplayNameDialog user={user} onClose={() => setNameDialogOpen(false)} />}
       {demoInfoOpen && (
         <div className="dialog-scrim" onMouseDown={(event) => event.target === event.currentTarget && setDemoInfoOpen(false)}>
           <section className="demo-info-dialog" role="dialog" aria-modal="true" aria-labelledby="demo-info-title">
