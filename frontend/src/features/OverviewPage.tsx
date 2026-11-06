@@ -5,7 +5,7 @@ import { ArrowDownRight, ArrowRight, ArrowUpRight, BellRing, CalendarDays, Circl
 import { ClaimBadge } from "../components/ClaimBadge";
 import { ChatEntry } from "../components/ChatEntry";
 import { ErrorState, InlineError, LoadingState } from "../components/Feedback";
-import { generateBrief, getOrders, getProduction, getReminders, type BriefData, type BriefFinding } from "../lib/api";
+import { generateBrief, getOrders, getProduction, getReminders, type BriefData, type BriefFinding, type Reminder } from "../lib/api";
 import { DUE_LABELS, formatWhen } from "../lib/reminders";
 
 interface OverviewPageProps {
@@ -92,7 +92,14 @@ export function OverviewPage({ onTrace, onAsk }: OverviewPageProps) {
     queryFn: () => getProduction({ start: weekStart, end: weekEnd }),
   });
   const [brief, setBrief] = useState<BriefData | null>(null);
-  const runBrief = useMutation({ mutationFn: generateBrief, onSuccess: (response) => setBrief(response.data) });
+  const [briefReminders, setBriefReminders] = useState<Reminder[]>([]);
+  const runBrief = useMutation({
+    mutationFn: generateBrief,
+    onSuccess: (response) => {
+      setBrief(response.data);
+      setBriefReminders(response.my_reminders ?? []);
+    },
+  });
   const orderData = orders.data?.data;
   const stageSummaries = production.data?.data.stage_summaries ?? [];
   const maxOutput = Math.max(1, ...stageSummaries.map((stage) => stage.total_pieces ?? 0));
@@ -101,7 +108,7 @@ export function OverviewPage({ onTrace, onAsk }: OverviewPageProps) {
     <div className="overview-page page-stack">
       <section className="brief-banner">
         <div className="brief-banner-copy">
-          <div className="eyebrow light">TUESDAY, APRIL 01 <span>·</span> DAILY CHECK-IN</div>
+          <div className="eyebrow light">WEDNESDAY, APRIL 01 <span>·</span> DAILY CHECK-IN</div>
           <h2>Know where to<br /><em>look first.</em></h2>
           <p>Prioritized operational findings, backed by traceable data and deterministic rules.</p>
         </div>
@@ -148,6 +155,18 @@ export function OverviewPage({ onTrace, onAsk }: OverviewPageProps) {
             <div className="brief-empty">
               <div className="empty-symbol"><Sparkles size={21} /></div>
               <div><strong>Brief not generated</strong><p>Run the deterministic checks to see the highest-priority findings.</p></div>
+            </div>
+          )}
+          {brief && briefReminders.length > 0 && (
+            <div className="brief-follow-ups">
+              <div className="brief-follow-ups-head"><BellRing size={14} /><strong>Your follow-ups today</strong><Link className="text-link" to="/reminders">Reminders <ArrowRight size={13} /></Link></div>
+              {briefReminders.map((item) => (
+                <div className="brief-follow-up" key={item.reminder_id}>
+                  <span className={`due-chip due-${item.due_state.toLowerCase()}`}>{DUE_LABELS[item.due_state]}</span>
+                  <span className="mono">{item.order_id}</span>
+                  <span className="due-note">{item.note}</span>
+                </div>
+              ))}
             </div>
           )}
           {brief && <BriefResults brief={brief} onTrace={onTrace} />}

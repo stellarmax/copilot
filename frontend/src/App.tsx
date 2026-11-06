@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
+import { ReminderNotifier } from "./components/ReminderNotifier";
 import { TraceDrawer } from "./components/TraceDrawer";
 import { AISettingsPage } from "./features/AISettingsPage";
 import { ChatPage } from "./features/ChatPage";
@@ -14,6 +15,7 @@ import { RemindersPage } from "./features/RemindersPage";
 import { SignInPage } from "./features/SignInPage";
 import { getCurrentUser, SIGNED_OUT_EVENT, type User } from "./lib/api";
 import { switchUser } from "./lib/session";
+import { useDueReminders } from "./lib/useDueReminders";
 
 export default function App() {
   const queryClient = useQueryClient();
@@ -42,10 +44,14 @@ function Workspace({ user }: { user: User }) {
   const location = useLocation();
   const navigate = useNavigate();
   const isChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
+  // Lives above both layouts so reminders still notify while the full-screen chat is open.
+  const { due } = useDueReminders();
+  const notifier = <ReminderNotifier due={due} userId={user.user_id} />;
 
   if (isChatRoute) {
     return (
       <>
+        {notifier}
         <Routes>
           <Route path="/chat" element={<ChatPage onTrace={setClaimId} />} />
           <Route path="/chat/:conversationId" element={<ChatPage onTrace={setClaimId} />} />
@@ -58,13 +64,14 @@ function Workspace({ user }: { user: User }) {
 
   return (
     <>
-      <AppShell user={user}>
+      {notifier}
+      <AppShell user={user} dueCount={due.length}>
         <Routes>
           <Route path="/" element={<OverviewPage onTrace={setClaimId} onAsk={(message) => navigate("/chat", { state: { initialMessage: message } })} />} />
           <Route path="/orders" element={<OrdersPage onTrace={setClaimId} />} />
           <Route path="/production" element={<ProductionPage onTrace={setClaimId} />} />
           <Route path="/feasibility" element={<FeasibilityPage onTrace={setClaimId} />} />
-          <Route path="/reminders" element={<RemindersPage />} />
+          <Route path="/reminders" element={<RemindersPage onTrace={setClaimId} />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/settings" element={<AISettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

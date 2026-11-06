@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, ArrowRight, BellRing, Bot, Check, CircleAlert, LoaderCircle, Mail, MessageSquarePlus, NotebookPen, Plus, Send, ShieldCheck, Trash2, UserRound, X } from "lucide-react";
+import { AlarmClock, ArrowLeft, ArrowRight, BellRing, Bot, Check, CircleAlert, CircleCheck, LoaderCircle, Mail, MessageSquarePlus, NotebookPen, Plus, Send, ShieldCheck, Trash2, UserRound, X } from "lucide-react";
 import { ClaimBadge } from "../components/ClaimBadge";
 import { ErrorState } from "../components/Feedback";
 import {
@@ -21,7 +21,7 @@ import {
   type ChatToolEvent,
   type PendingAction,
 } from "../lib/api";
-import { formatWhen } from "../lib/reminders";
+import { DUE_LABELS, REPEAT_LABELS, formatWhen } from "../lib/reminders";
 
 function displayToolName(value: string) {
   return value.replaceAll("_", " ");
@@ -69,6 +69,12 @@ export function ToolResultCard({ event, onTrace, onClarify }: {
       )}
       {orders.slice(0, 5).map((order: Record<string, any>) => (
         <div className="chat-order-line" key={order.order_id}><code>{order.order_id}</code><span>{order.customer}</span><span>{order.current_stage}</span><b>{Number(order.pieces).toLocaleString()} pcs</b></div>
+      ))}
+      {Array.isArray(data.reminders) && data.reminders.slice(0, 6).map((item: Record<string, any>) => (
+        <div className="chat-order-line" key={item.reminder_id}>
+          <span className={`due-chip due-${String(item.due_state).toLowerCase()}`}>{DUE_LABELS[item.due_state as keyof typeof DUE_LABELS] ?? item.due_state}</span>
+          <code>{item.order_id}</code><span>{item.note}</span><b>{formatWhen(item.remind_at)}</b>
+        </div>
       ))}
       {findings.map((finding: Record<string, any>) => (
         <div className="chat-finding-line" key={finding.finding_id}><span className={`severity-label ${String(finding.severity).toLowerCase()}`}>{finding.severity}</span><span>{finding.summary}</span></div>
@@ -118,6 +124,8 @@ const ACTION_COPY = {
   create_reminder: { title: "Reminder", icon: BellRing, done: "Reminder saved. It now appears on the Reminders page." },
   add_order_note: { title: "Order note", icon: NotebookPen, done: "Note recorded in the action log." },
   draft_chase_up_message: { title: "Chase-up draft", icon: Mail, done: "Draft saved to the action log. It was not sent to anyone." },
+  reschedule_reminder: { title: "Reschedule reminder", icon: AlarmClock, done: "Reminder moved to the new time." },
+  complete_reminder: { title: "Complete reminder", icon: CircleCheck, done: "Reminder marked done. A repeating reminder moves to its next time." },
 } as const;
 
 export function PendingActionCard({ action }: { action: PendingAction }) {
@@ -129,13 +137,15 @@ export function PendingActionCard({ action }: { action: PendingAction }) {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["action-audit"] });
       queryClient.invalidateQueries({ queryKey: ["reminders"] });
+      queryClient.invalidateQueries({ queryKey: ["reminder-suggestions"] });
     },
   });
   const recorded = audit.data?.find((item) => item.confirmation_token === action.confirmation_token)?.status;
   const state = decide.data ? (decide.variables === "confirm" ? "CONFIRMED" : "CANCELLED") : recorded ?? "PREPARED";
   const copy = ACTION_COPY[action.preview.action_type];
   const Icon = copy.icon;
-  const text = action.preview.payload.message ?? action.preview.payload.note ?? "";
+  const payload = action.preview.payload;
+  const text = payload.message ?? payload.note ?? payload.reminder_note ?? "";
 
   return (
     <section className={`pending-action-card state-${state.toLowerCase()}`} aria-label={`${copy.title} awaiting confirmation`}>
@@ -144,7 +154,13 @@ export function PendingActionCard({ action }: { action: PendingAction }) {
         <div><strong>{copy.title}</strong><span className="mono">{action.preview.target}</span></div>
         <span className="pending-action-state">{state === "PREPARED" ? "Needs your confirmation" : state === "CONFIRMED" ? "Confirmed" : "Cancelled"}</span>
       </div>
-      {action.preview.payload.remind_at && <div className="pending-action-when">{formatWhen(action.preview.payload.remind_at)}</div>}
+      {payload.remind_at && (
+        <div className="pending-action-when">
+          {payload.current_remind_at && <>{formatWhen(payload.current_remind_at)} → </>}
+          {formatWhen(payload.remind_at)}
+          {payload.repeat && payload.repeat !== "NONE" && <> · {REPEAT_LABELS[payload.repeat]}</>}
+        </div>
+      )}
       <p className="pending-action-text">{text}</p>
       {state === "PREPARED" ? (
         <div className="pending-action-buttons">

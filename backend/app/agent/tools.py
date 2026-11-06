@@ -1,4 +1,4 @@
-"""Strict, read-only Agent tools mapped to deterministic core methods."""
+"""Strict Agent tools mapped to deterministic core methods: read-only queries plus prepare-only actions."""
 
 from __future__ import annotations
 
@@ -68,17 +68,31 @@ class BriefArguments(ToolArguments):
 
 
 class PrepareActionArguments(ToolArguments):
-    action_type: Literal["add_order_note", "create_reminder", "draft_chase_up_message"]
-    order_id: str = Field(min_length=1, max_length=32)
-    text: str = Field(min_length=1, max_length=1000)
+    action_type: Literal["add_order_note", "create_reminder", "draft_chase_up_message",
+                         "reschedule_reminder", "complete_reminder"]
+    order_id: str | None = Field(default=None, min_length=1, max_length=32)
+    text: str | None = Field(default=None, min_length=1, max_length=1000)
     remind_at: str | None = Field(default=None, max_length=64)
+    repeat: Literal["NONE", "DAILY", "WEEKLY"] | None = None
+    reminder_id: str | None = Field(default=None, min_length=1, max_length=32)
     claim_ids: list[str] = Field(default_factory=list, max_length=10)
 
     @model_validator(mode="after")
-    def validate_reminder_time(self) -> "PrepareActionArguments":
-        if (self.action_type == "create_reminder") != (self.remind_at is not None):
-            raise ValueError("remind_at is required for create_reminder and only allowed there")
+    def validate_fields_for_action(self) -> "PrepareActionArguments":
+        on_reminder = self.action_type in ("reschedule_reminder", "complete_reminder")
+        if on_reminder != (self.reminder_id is not None):
+            raise ValueError("reminder_id is required to reschedule or complete a reminder, and only allowed there")
+        if not on_reminder and (self.order_id is None or self.text is None):
+            raise ValueError("order_id and text are required for notes, reminders and chase-up drafts")
+        if (self.action_type in ("create_reminder", "reschedule_reminder")) != (self.remind_at is not None):
+            raise ValueError("remind_at is required to create or reschedule a reminder, and only allowed there")
+        if self.repeat is not None and self.action_type != "create_reminder":
+            raise ValueError("repeat is only allowed for create_reminder")
         return self
+
+
+class ListRemindersArguments(ToolArguments):
+    include_closed: bool = False
 
 
 class TraceArguments(ToolArguments):
@@ -94,6 +108,7 @@ TOOL_MODELS: dict[str, type[ToolArguments]] = {
     "estimate_order_feasibility": FeasibilityArguments,
     "discover_operational_issues": BriefArguments,
     "trace_claim": TraceArguments,
+    "list_reminders": ListRemindersArguments,
     "prepare_action": PrepareActionArguments,
 }
 
@@ -107,11 +122,16 @@ TOOL_DESCRIPTIONS = {
                                   "This is not a delivery guarantee.",
     "discover_operational_issues": "Generate the deterministic operations brief for a business date.",
     "trace_claim": "Retrieve or re-verify an existing registered claim using its exact claim ID.",
-    "prepare_action": "PREPARE (never execute) an action for one existing order: add_order_note (text = the note), "
-                      "create_reminder (text = what to remember, remind_at = ISO 8601 date-time with timezone offset), or "
-                      "draft_chase_up_message (text = the draft; it is never sent). The user sees a preview card and "
-                      "decides with Confirm or Cancel. Text containing business numbers (pieces, days late) needs the "
-                      "claim_ids of the tool results those numbers came from.",
+    "list_reminders": "List the signed-in user's own reminders with due state (OVERDUE, DUE_SOON, UPCOMING), repeat rule "
+                      "and each order's current status and risk. Use it for 'what reminders do I have' and to find the "
+                      "reminder_id before rescheduling or completing one.",
+    "prepare_action": "PREPARE (never execute) an action. For one existing order: add_order_note (order_id, text = the note), "
+                      "create_reminder (order_id, text = what to remember, remind_at = ISO 8601 date-time with timezone "
+                      "offset, optional repeat = DAILY or WEEKLY), or draft_chase_up_message (order_id, text = the draft; it "
+                      "is never sent). For one of the user's active reminders (reminder_id from list_reminders): "
+                      "reschedule_reminder (remind_at = new time) or complete_reminder (a repeating reminder moves to its "
+                      "next time). The user sees a preview card and decides with Confirm or Cancel. Text containing "
+                      "business numbers (pieces, days late) needs the claim_ids of the tool results those numbers came from.",
 }
 
 
@@ -158,12 +178,17 @@ def execute_tool(core: CopilotCore, name: str, arguments: dict[str, Any], owner_
         return core.discover_operational_issues(**values)
     if name == "trace_claim":
         return core.trace_claim(values["claim_id"], verify=values.get("verify", False))
+    if name == "list_reminders":
+        return core.reminder_overview(owner_id, values.get("include_closed", False))
     if name == "prepare_action":
-        text = values["text"]
-        payload = {"add_order_note": {"note": text},
-                   "create_reminder": {"remind_at": values.get("remind_at"), "message": text},
-                   "draft_chase_up_message": {"message": text}}[values["action_type"]]
-        return core.manage_action("PREPARE", "assistant", values["action_type"], values["order_id"],
+        action_type, text = values["action_type"], values.get("text")
+        payload = {"add_order_note": lambda: {"note": text},
+                   "create_reminder": lambda: {"remind_at": values["remind_at"], "message": text,
+                                               "repeat": values.get("repeat", "NONE")},
+                   "draft_chase_up_message": lambda: {"message": text},
+                   "reschedule_reminder": lambda: {"reminder_id": values["reminder_id"], "remind_at": values["remind_at"]},
+                   "complete_reminder": lambda: {"reminder_id": values["reminder_id"]}}[action_type]()
+        return core.manage_action("PREPARE", "assistant", action_type, values.get("order_id"),
                                   payload, values.get("claim_ids", []), owner_id=owner_id)
     raise ValueError("This tool is not allowed.")
 

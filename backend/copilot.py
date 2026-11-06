@@ -65,6 +65,8 @@ def canonical_product(name: str) -> str:
     if text.endswith("s"):
         candidates.append(text[:-1])
     return next((item for item in candidates if item in PRODUCT_CATEGORIES), text)
+REMINDER_REPEATS: dict[str, timedelta | None] = {"NONE": None, "DAILY": timedelta(days=1), "WEEKLY": timedelta(weeks=1)}
+REMINDER_ACTIONS = ("reschedule_reminder", "complete_reminder")
 CLAIM_RE = re.compile(r"^CLM-\d{8}-(RISK|NORM|DISC|FEAS|RETR|ACTN)-\d{3,}-[a-f0-9]{8}$")
 
 
@@ -233,6 +235,17 @@ class CopilotCore:
             columns = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
             if "owner_id" not in columns:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'local'")
+        # Sprint 3 reminder fields: repetition, the evidence a suggested reminder came from, last completion.
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(reminders)")}
+        for column, definition in (("repeat", "TEXT NOT NULL DEFAULT 'NONE'"), ("claim_id", "TEXT"),
+                                   ("last_completed_at", "TEXT")):
+            if column not in columns:
+                self.conn.execute(f"ALTER TABLE reminders ADD COLUMN {column} {definition}")
+        self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS reminder_suggestion_dismissals (
+                   owner_id TEXT NOT NULL, order_id TEXT NOT NULL, dismissed_at TEXT NOT NULL,
+                   PRIMARY KEY (owner_id, order_id))"""
+        )
         self.conn.commit()
 
     def new_context(self) -> ReadContext:
@@ -1190,6 +1203,37 @@ class CopilotCore:
             raise CoreError("INVALID_INPUT", "remind_at must be in the future", "remind_at")
         return moment.astimezone(timezone.utc)
 
+    @staticmethod
+    def _validate_repeat(value: Any) -> str:
+        if value not in REMINDER_REPEATS:
+            raise CoreError("INVALID_INPUT", "repeat must be NONE, DAILY or WEEKLY", "repeat")
+        return value
+
+    def _validate_claim_id(self, claim_id: Any) -> str | None:
+        if claim_id in (None, ""):
+            return None
+        if not isinstance(claim_id, str) or not CLAIM_RE.fullmatch(claim_id) or \
+                self.conn.execute("SELECT 1 FROM claim_records WHERE claim_id=?", (claim_id,)).fetchone() is None:
+            raise CoreError("INVALID_INPUT", "claim_id must be a registered claim", "claim_id")
+        return claim_id
+
+    @staticmethod
+    def _completion_fields(row: sqlite3.Row, now: datetime) -> dict[str, Any]:
+        """Done on a one-off reminder closes it; on a repeating one it moves to the next future occurrence."""
+        step = REMINDER_REPEATS.get(row["repeat"] or "NONE")
+        if step is None:
+            return {"status": "DONE", "last_completed_at": now.isoformat()}
+        # Finishing an occurrence early still counts for that occurrence, so always move at least one step.
+        next_time = datetime.fromisoformat(row["remind_at"]) + step
+        while next_time <= now:
+            next_time += step
+        return {"status": "ACTIVE", "remind_at": next_time.isoformat(), "last_completed_at": now.isoformat()}
+
+    def _write_reminder_fields(self, reminder_id: str, owner_id: str, fields: dict[str, Any]) -> None:
+        assignments = ", ".join(f"{key}=?" for key in fields)
+        self.conn.execute(f"UPDATE reminders SET {assignments}, updated_at=? WHERE reminder_id=? AND owner_id=?",
+                          (*fields.values(), iso_utc(), reminder_id, owner_id))
+
     def _resolve_order_id(self, order_id: Any) -> str:
         wanted = str(order_id or "").strip().upper()
         if not any(row["order_id"] == wanted for row in self.load_orders(self.new_context())):
@@ -1217,44 +1261,178 @@ class CopilotCore:
             due_state = "UPCOMING"
         return {key: row[key] for key in row.keys()} | {"due_state": due_state}
 
+    def _with_order_context(self, views: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Attach each reminder's order as it stands on the business date, so a stale reminder is visible."""
+        if not views:
+            return views
+        context = self.new_context()
+        orders = {row["order_id"]: row for row in self.load_orders(context)}
+        cache: dict[str, dict[str, Any] | None] = {}
+        for view in views:
+            order_id = view["order_id"]
+            if order_id not in cache:
+                order = orders.get(order_id)
+                if order is None:
+                    cache[order_id] = None
+                else:
+                    risk = self.assess_order_risk(order_id, context=context, _register=False).get("data") or {}
+                    cache[order_id] = {
+                        "customer": order["customer"], "status": order["status"], "current_stage": order["current_stage"],
+                        "due_date": order["due_date"].isoformat(), "days_to_due": risk.get("days_to_due"),
+                        "risk_level": risk.get("risk_level"),
+                        # A completed order needs no more chasing; the UI offers to close the reminder.
+                        "suggest_close": order["status"] == "COMPLETE",
+                    }
+            view["order_context"] = cache[order_id]
+        return views
+
     def _insert_reminder(self, order_id: str, note: str, remind_at: datetime, source: str, action_token: str | None,
-                         owner_id: str = "local") -> dict[str, Any]:
+                         owner_id: str = "local", repeat: str = "NONE", claim_id: str | None = None) -> dict[str, Any]:
         now = iso_utc()
         reminder_id = f"REM-{secrets.token_hex(4).upper()}"
         self.conn.execute(
             """INSERT INTO reminders (reminder_id, order_id, note, remind_at, status, source, action_token,
-                                      created_at, updated_at, owner_id) VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?)""",
-            (reminder_id, order_id, note, remind_at.isoformat(), source, action_token, now, now, owner_id))
+                                      created_at, updated_at, owner_id, repeat, claim_id)
+               VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?, ?, ?)""",
+            (reminder_id, order_id, note, remind_at.isoformat(), source, action_token, now, now, owner_id, repeat, claim_id))
         return self.get_reminder(reminder_id, owner_id)
 
     def get_reminder(self, reminder_id: str, owner_id: str = "local") -> dict[str, Any] | None:
         row = self.conn.execute("SELECT * FROM reminders WHERE reminder_id=? AND owner_id=?", (reminder_id, owner_id)).fetchone()
-        return self._reminder_view(row, datetime.now(timezone.utc)) if row else None
+        return self._with_order_context([self._reminder_view(row, datetime.now(timezone.utc))])[0] if row else None
 
     def list_reminders(self, include_closed: bool = False, owner_id: str = "local") -> list[dict[str, Any]]:
         query = "SELECT * FROM reminders WHERE owner_id=?" + ("" if include_closed else " AND status='ACTIVE'") + " ORDER BY remind_at"
         now = datetime.now(timezone.utc)
-        return [self._reminder_view(row, now) for row in self.conn.execute(query, (owner_id,)).fetchall()]
+        return self._with_order_context([self._reminder_view(row, now) for row in self.conn.execute(query, (owner_id,)).fetchall()])
+
+    def reminder_overview(self, owner_id: str = "local", include_closed: bool = False) -> dict[str, Any]:
+        """The user's reminders for the chat agent: no tokens, plus counts the model must not work out itself."""
+        reminders = [{key: value for key, value in item.items() if key != "action_token"}
+                     for item in self.list_reminders(include_closed, owner_id)]
+        counts = {state: sum(1 for item in reminders if item["due_state"] == state)
+                  for state in ("OVERDUE", "DUE_SOON", "UPCOMING")}
+        summary = (f"{counts['OVERDUE'] + counts['DUE_SOON'] + counts['UPCOMING']} active reminders: "
+                   f"{counts['OVERDUE']} overdue, {counts['DUE_SOON']} due within 24 hours, {counts['UPCOMING']} later.")
+        return {"result_status": "OK", "summary": summary,
+                "data": {"reminders": reminders, "counts": counts,
+                         "note": "Reminder times are real-world clock times, not the business date."}}
+
+    def suggest_reminders(self, owner_id: str = "local", limit: int = 10) -> dict[str, Any]:
+        """High and critical in-progress orders that this user is not yet following up on.
+
+        Deterministic: the order risk rules pick the orders and phrase the reasons; each suggestion
+        cites the registered risk claim. Creating the reminder is still the user's decision.
+        """
+        context = self.new_context()
+        followed = {row[0] for row in self.conn.execute(
+            "SELECT order_id FROM reminders WHERE owner_id=? AND status='ACTIVE'", (owner_id,))}
+        dismissed = {row[0] for row in self.conn.execute(
+            "SELECT order_id FROM reminder_suggestion_dismissals WHERE owner_id=?", (owner_id,))}
+        suggestions = []
+        for order in self.load_orders(context):
+            if order["status"] != "IN_PROGRESS" or order["order_id"] in followed or order["order_id"] in dismissed:
+                continue
+            quick = self.assess_order_risk(order["order_id"], context=context, _register=False).get("data") or {}
+            if quick.get("risk_level") not in ("HIGH", "CRITICAL"):
+                continue
+            risk = self.assess_order_risk(order["order_id"], context=context)
+            data = risk["data"]
+            reasons = []
+            for factor in data["risk_factors"]:
+                if factor["rule_id"] == "ORDER_OVERDUE":
+                    days = factor["days_past_due"]
+                    reasons.append(f"overdue by {days} day{'s' if days != 1 else ''}")
+                elif factor["rule_id"] == "DEADLINE_APPROACHING":
+                    days = factor["days_to_due"]
+                    reasons.append("due today" if days == 0 else f"due in {days} day{'s' if days != 1 else ''}")
+                elif factor["rule_id"] == "ORDER_STAGNANT":
+                    days = factor["inactive_working_days"]
+                    reasons.append(f"no progress for {days} working days")
+            suggestions.append({
+                "order_id": order["order_id"], "customer": order["customer"], "product": order["product"],
+                "pieces": order["pieces"], "current_stage": order["current_stage"],
+                "due_date": order["due_date"].isoformat(), "days_to_due": data["days_to_due"],
+                "risk_level": data["risk_level"], "rules_triggered": data["rules_triggered"], "reasons": reasons,
+                "suggested_note": f"Follow up on {order['order_id']} ({order['customer']}): {'; '.join(reasons)}.",
+                "claim_id": risk["claim_refs"][0]["claim_id"] if risk.get("claim_refs") else None,
+            })
+        suggestions.sort(key=lambda item: (item["risk_level"] != "CRITICAL", item["days_to_due"], item["order_id"]))
+        return {"business_as_of_date": self.as_of_date.isoformat(), "suggestions": suggestions[:limit],
+                "total_suggestions": len(suggestions), "dismissed_count": len(dismissed),
+                "rule_notice": self.config["assumption_notice"]}
+
+    def dismiss_reminder_suggestion(self, order_id: str, owner_id: str = "local") -> dict[str, Any]:
+        try:
+            target = self._resolve_order_id(order_id)
+        except CoreError as exc:
+            return {"status": "REFUSED", "error": {"code": exc.code, "message": str(exc)}}
+        self.conn.execute("INSERT OR REPLACE INTO reminder_suggestion_dismissals VALUES (?, ?, ?)", (owner_id, target, iso_utc()))
+        self.conn.commit()
+        return {"status": "DISMISSED", "order_id": target}
+
+    def restore_reminder_suggestions(self, owner_id: str = "local") -> dict[str, Any]:
+        removed = self.conn.execute("DELETE FROM reminder_suggestion_dismissals WHERE owner_id=?", (owner_id,)).rowcount
+        self.conn.commit()
+        return {"status": "RESTORED", "restored_count": removed}
+
+    def reminders_ics(self, owner_id: str = "local") -> str:
+        """Active reminders as an iCalendar file (RFC 5545) for Outlook, Google or Apple Calendar."""
+        def escape(text: str) -> str:
+            return text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+
+        def fold(line: str) -> list[str]:
+            parts, data = [], line.encode("utf-8")
+            while len(data) > 75:
+                cut = 75 if not parts else 74
+                while (data[cut] & 0xC0) == 0x80:  # never split a UTF-8 character
+                    cut -= 1
+                parts.append(data[:cut].decode("utf-8"))
+                data = data[cut:]
+            parts.append(data.decode("utf-8"))
+            return [parts[0]] + [" " + part for part in parts[1:]]
+
+        def stamp(moment: datetime) -> str:
+            return moment.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+        now = stamp(datetime.now(timezone.utc))
+        lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//GM Co-Pilot//Reminders//EN", "CALSCALE:GREGORIAN",
+                 "METHOD:PUBLISH", "X-WR-CALNAME:GM Co-Pilot reminders"]
+        for item in self.list_reminders(False, owner_id):
+            start = datetime.fromisoformat(item["remind_at"])
+            lines += ["BEGIN:VEVENT", f"UID:{item['reminder_id']}@gm-copilot", f"DTSTAMP:{now}",
+                      f"DTSTART:{stamp(start)}", f"DTEND:{stamp(start + timedelta(minutes=15))}",
+                      f"SUMMARY:{escape('Follow up ' + item['order_id'])}", f"DESCRIPTION:{escape(item['note'])}"]
+            if item.get("repeat") in ("DAILY", "WEEKLY"):
+                lines.append(f"RRULE:FREQ={item['repeat']}")
+            lines += ["BEGIN:VALARM", "ACTION:DISPLAY", f"DESCRIPTION:{escape(item['note'])}", "TRIGGER:PT0M",
+                      "END:VALARM", "END:VEVENT"]
+        lines.append("END:VCALENDAR")
+        return "\r\n".join(folded for line in lines for folded in fold(line)) + "\r\n"
 
     def create_reminder(self, order_id: str, note: str, remind_at: str, requester: str = "web",
-                        owner_id: str = "local") -> dict[str, Any]:
+                        owner_id: str = "local", repeat: str = "NONE", claim_id: str | None = None) -> dict[str, Any]:
         """Create a reminder directly (an explicit user form submission) and log it in the action ledger."""
         try:
             target = self._resolve_order_id(order_id)
             text = self._validate_note(note)
             moment = self._parse_remind_at(remind_at)
+            repeat = self._validate_repeat(repeat)
+            claim_id = self._validate_claim_id(claim_id)
         except CoreError as exc:
             return {"status": "REFUSED", "error": {"code": exc.code, "message": str(exc)}}
         token = secrets.token_urlsafe(24)
         now = iso_utc()
-        payload = {"remind_at": moment.isoformat(), "message": text}
-        preview = {"action_type": "create_reminder", "target": target, "payload": payload, "claim_ids": []}
+        payload = {"remind_at": moment.isoformat(), "message": text, "repeat": repeat}
+        claim_ids = [claim_id] if claim_id else []
+        preview = {"action_type": "create_reminder", "target": target, "payload": payload, "claim_ids": claim_ids}
         self.conn.execute(
             """INSERT INTO action_records (token, requester, action_type, target, preview_json, claim_ids_json, status,
                                            prepared_at, completed_at, owner_id)
-               VALUES (?, ?, 'create_reminder', ?, ?, '[]', 'CONFIRMED', ?, ?, ?)""",
-            (token, requester, target, json.dumps(preview, ensure_ascii=False, sort_keys=True), now, now, owner_id))
-        reminder = self._insert_reminder(target, text, moment, requester, token, owner_id)
+               VALUES (?, ?, 'create_reminder', ?, ?, ?, 'CONFIRMED', ?, ?, ?)""",
+            (token, requester, target, json.dumps(preview, ensure_ascii=False, sort_keys=True), json.dumps(claim_ids),
+             now, now, owner_id))
+        reminder = self._insert_reminder(target, text, moment, requester, token, owner_id, repeat, claim_id)
         effect = {"action_type": "create_reminder", "target": target, "payload": payload,
                   "mode": "reminder_saved", "reminder_id": reminder["reminder_id"], "external_message_sent": False}
         self.conn.execute("INSERT INTO action_effects VALUES (?, 'create_reminder', ?, ?, ?)",
@@ -1271,8 +1449,11 @@ class CopilotCore:
             if "status" in changes:
                 if changes["status"] not in ("DONE", "CANCELLED", "ACTIVE"):
                     raise CoreError("INVALID_INPUT", "status must be ACTIVE, DONE or CANCELLED", "status")
-                fields["status"] = changes["status"]
-            edits_content = any(key in changes for key in ("order_id", "note", "remind_at"))
+                if changes["status"] == "DONE" and row["status"] == "ACTIVE":
+                    fields.update(self._completion_fields(row, datetime.now(timezone.utc)))
+                else:
+                    fields["status"] = changes["status"]
+            edits_content = any(key in changes for key in ("order_id", "note", "remind_at", "repeat"))
             if edits_content and row["status"] != "ACTIVE" and changes.get("status") != "ACTIVE":
                 raise CoreError("INVALID_INPUT", "Only active reminders can be edited")
             if "order_id" in changes:
@@ -1281,12 +1462,12 @@ class CopilotCore:
                 fields["note"] = self._validate_note(changes["note"])
             if "remind_at" in changes:
                 fields["remind_at"] = self._parse_remind_at(changes["remind_at"]).isoformat()
+            if "repeat" in changes:
+                fields["repeat"] = self._validate_repeat(changes["repeat"])
         except CoreError as exc:
             return {"status": "REFUSED", "error": {"code": exc.code, "message": str(exc)}}
         if fields:
-            assignments = ", ".join(f"{key}=?" for key in fields)
-            self.conn.execute(f"UPDATE reminders SET {assignments}, updated_at=? WHERE reminder_id=? AND owner_id=?",
-                              (*fields.values(), iso_utc(), reminder_id, owner_id))
+            self._write_reminder_fields(reminder_id, owner_id, fields)
             self.conn.commit()
         return {"status": "UPDATED", "reminder": self.get_reminder(reminder_id, owner_id)}
 
@@ -1298,20 +1479,32 @@ class CopilotCore:
         operation = operation.upper()
         if operation == "PREPARE":
             try:
-                if action_type not in ("add_order_note", "create_reminder", "create_watch", "draft_chase_up_message"):
+                if action_type not in ("add_order_note", "create_reminder", "create_watch", "draft_chase_up_message",
+                                       "reschedule_reminder", "complete_reminder"):
                     raise CoreError("INVALID_INPUT", "Unsupported action_type")
+                payload = payload or {}
+                if not isinstance(payload, dict):
+                    raise CoreError("INVALID_INPUT", "payload must be a JSON object")
+                if action_type in REMINDER_ACTIONS:
+                    # Changes to an existing reminder target that reminder; its order becomes the action target.
+                    reminder_row = self.conn.execute(
+                        "SELECT * FROM reminders WHERE reminder_id=? AND owner_id=?",
+                        (str(payload.get("reminder_id", "")).strip().upper(), owner_id)).fetchone()
+                    if reminder_row is None or reminder_row["status"] != "ACTIVE":
+                        raise CoreError("TARGET_NOT_RESOLVED", "reminder_id must be one of your active reminders")
+                    target = reminder_row["order_id"]
+                    payload = {**payload, "reminder_id": reminder_row["reminder_id"], "reminder_note": reminder_row["note"],
+                               "current_remind_at": reminder_row["remind_at"]}
                 if not isinstance(requester, str) or not requester.strip() or not isinstance(target, str) or not target.strip():
                     raise CoreError("INVALID_INPUT", "requester and a resolved target are required")
                 context = self.new_context()
                 order = next((row for row in self.load_orders(context) if row["order_id"] == target.strip().upper()), None)
                 if order is None:
                     raise CoreError("TARGET_NOT_RESOLVED", "Target must be an existing, uniquely resolved order")
-                payload = payload or {}
-                if not isinstance(payload, dict):
-                    raise CoreError("INVALID_INPUT", "payload must be a JSON object")
                 required_payload = {
                     "add_order_note": ("note",), "create_reminder": ("remind_at", "message"),
                     "create_watch": ("tool_name", "condition", "message"), "draft_chase_up_message": ("message",),
+                    "reschedule_reminder": ("reminder_id", "remind_at"), "complete_reminder": ("reminder_id",),
                 }[action_type]
                 if any(not isinstance(payload.get(key), str) or not payload[key].strip() for key in required_payload):
                     raise CoreError("INVALID_INPUT", f"payload requires non-empty string fields: {', '.join(required_payload)}")
@@ -1319,8 +1512,10 @@ class CopilotCore:
                     raise CoreError("INVALID_INPUT", "Order note exceeds 500 characters")
                 if any(len(payload[key]) > 1000 for key in required_payload if key != "remind_at"):
                     raise CoreError("INVALID_INPUT", "Action text exceeds 1000 characters")
-                if action_type == "create_reminder":
+                if action_type in ("create_reminder", "reschedule_reminder"):
                     payload = {**payload, "remind_at": self._parse_remind_at(payload["remind_at"]).isoformat()}
+                if action_type == "create_reminder":
+                    payload["repeat"] = self._validate_repeat(payload.get("repeat", "NONE"))
                 if action_type == "create_watch" and payload["tool_name"] not in ("search_orders", "get_production_output", "assess_order_risk", "assess_output_normality", "estimate_order_feasibility"):
                     raise CoreError("INVALID_INPUT", "Watch condition must reference a checkable tool")
                 claim_ids = claim_ids or []
@@ -1328,7 +1523,9 @@ class CopilotCore:
                     raise CoreError("INVALID_INPUT", "Every claim_id must be a registered claim")
                 # Business numbers (pieces, days late, ...) need evidence. Schedule times, order IDs and
                 # dates are identifiers, not claims, so they are ignored by this check.
-                checked_text = " ".join(str(value) for key, value in payload.items() if key != "remind_at")
+                # Reminder IDs, times, the repeat rule and an existing reminder's own note are not new content.
+                checked_text = " ".join(str(value) for key, value in payload.items()
+                                        if key not in ("remind_at", "current_remind_at", "reminder_id", "reminder_note", "repeat"))
                 checked_text = re.sub(r"\bORD-\d+\b|\b\d{4}-\d{2}-\d{2}(T[\d:.+\-Z]*)?\b", " ", checked_text)
                 if re.search(r"\d", checked_text) and not claim_ids:
                     raise CoreError("CLAIM_REQUIRED", "Action content with numbers requires at least one claim_id")
@@ -1366,17 +1563,34 @@ class CopilotCore:
                       "mode": "local_record_only", "external_message_sent": False}
             if row["action_type"] == "create_reminder":
                 # Confirming a prepared reminder saves a real reminder, even if its time passed meanwhile.
+                claim_ids = json.loads(row["claim_ids_json"])
                 reminder = self._insert_reminder(row["target"], preview["payload"]["message"],
                                                  datetime.fromisoformat(preview["payload"]["remind_at"]),
-                                                 row["requester"], confirmation_token, owner_id)
+                                                 row["requester"], confirmation_token, owner_id,
+                                                 preview["payload"].get("repeat", "NONE"), claim_ids[0] if claim_ids else None)
                 effect.update({"mode": "reminder_saved", "reminder_id": reminder["reminder_id"]})
+            elif row["action_type"] in REMINDER_ACTIONS:
+                reminder_id = preview["payload"]["reminder_id"]
+                reminder_row = self.conn.execute("SELECT * FROM reminders WHERE reminder_id=? AND owner_id=?",
+                                                 (reminder_id, owner_id)).fetchone()
+                if reminder_row is None or reminder_row["status"] != "ACTIVE":
+                    self.conn.rollback()
+                    return {"status": "REFUSED", "error": {"code": "TARGET_CHANGED",
+                                                           "message": "The reminder is no longer active"}}
+                fields = ({"remind_at": preview["payload"]["remind_at"]} if row["action_type"] == "reschedule_reminder"
+                          else self._completion_fields(reminder_row, datetime.now(timezone.utc)))
+                self._write_reminder_fields(reminder_id, owner_id, fields)
+                effect.update({"mode": "reminder_updated", "reminder_id": reminder_id, "changes": fields})
             self.conn.execute("INSERT INTO action_effects VALUES (?, ?, ?, ?, ?)",
                               (confirmation_token, row["action_type"], row["target"], json.dumps(effect, ensure_ascii=False, sort_keys=True), completed_at))
             self.conn.execute("UPDATE action_records SET status='CONFIRMED', completed_at=? WHERE token=?", (completed_at, confirmation_token))
             self.conn.commit()
             return {"status": "CONFIRMED", "executed_preview": preview, "recorded_effect": effect,
-                    "execution_mode": "reminder saved to the reminders list" if row["action_type"] == "create_reminder"
-                    else "local action ledger only; watch scheduling and message delivery are not connected", "confirmed_at": completed_at}
+                    "execution_mode": {"create_reminder": "reminder saved to the reminders list",
+                                       "reschedule_reminder": "reminder rescheduled",
+                                       "complete_reminder": "reminder marked done"}.get(
+                        row["action_type"], "local action ledger only; watch scheduling and message delivery are not connected"),
+                    "confirmed_at": completed_at}
         return {"status": "REFUSED", "error": {"code": "INVALID_OPERATION", "message": "operation must be PREPARE, CONFIRM, or CANCEL"}}
 
     def action_audit(self, owner_id: str = "local") -> list[dict[str, Any]]:

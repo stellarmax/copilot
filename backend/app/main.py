@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 from backend.copilot import (
@@ -58,6 +59,8 @@ class ActionPrepareRequest(StrictRequest):
         "create_reminder",
         "create_watch",
         "draft_chase_up_message",
+        "reschedule_reminder",
+        "complete_reminder",
     ]
     target: str = Field(min_length=1)
     payload: dict[str, Any]
@@ -82,12 +85,15 @@ class ReminderCreateRequest(StrictRequest):
     order_id: str = Field(min_length=1, max_length=32)
     note: str = Field(min_length=1, max_length=500)
     remind_at: str = Field(min_length=1, max_length=64)
+    repeat: Literal["NONE", "DAILY", "WEEKLY"] = "NONE"
+    claim_id: str | None = Field(default=None, max_length=80)
 
 
 class ReminderUpdateRequest(StrictRequest):
     order_id: str | None = Field(default=None, min_length=1, max_length=32)
     note: str | None = Field(default=None, min_length=1, max_length=500)
     remind_at: str | None = Field(default=None, min_length=1, max_length=64)
+    repeat: Literal["NONE", "DAILY", "WEEKLY"] | None = None
     status: Literal["ACTIVE", "DONE", "CANCELLED"] | None = None
 
 
@@ -310,16 +316,22 @@ def create_app(
     @app.post("/api/v1/brief", tags=["brief"])
     def generate_brief(
         payload: BriefRequest | None = None,
+        user: dict = Depends(current_user),
         core: CopilotCore = Depends(get_core),
     ) -> dict[str, Any]:
         payload = payload or BriefRequest()
-        return _tool_result(
+        result = _tool_result(
             core.discover_operational_issues(
                 as_of_date=payload.as_of_date.isoformat() if payload.as_of_date else None,
                 lookback_days=payload.lookback_days,
                 max_findings=payload.max_findings,
             )
         )
+        # The user's own follow-ups due now or within 24 hours. They sit beside the brief, outside its
+        # claim, because reminders are per user and run on the real clock rather than the business date.
+        result["my_reminders"] = [item for item in core.list_reminders(False, user["user_id"])
+                                  if item["due_state"] in ("OVERDUE", "DUE_SOON")]
+        return result
 
     @app.get("/api/v1/claims/{claim_id}", tags=["evidence"])
     def trace_claim(claim_id: str, core: CopilotCore = Depends(get_core)) -> dict[str, Any]:
@@ -422,7 +434,26 @@ def create_app(
     @app.post("/api/v1/reminders", tags=["reminders"])
     def create_reminder(payload: ReminderCreateRequest, user: dict = Depends(current_user),
                         core: CopilotCore = Depends(get_core)) -> dict[str, Any]:
-        return _action_result(core.create_reminder(payload.order_id, payload.note, payload.remind_at, owner_id=user["user_id"]))
+        return _action_result(core.create_reminder(payload.order_id, payload.note, payload.remind_at,
+                                                   owner_id=user["user_id"], repeat=payload.repeat, claim_id=payload.claim_id))
+
+    @app.get("/api/v1/reminders/suggestions", tags=["reminders"])
+    def reminder_suggestions(user: dict = Depends(current_user), core: CopilotCore = Depends(get_core)) -> dict[str, Any]:
+        return core.suggest_reminders(user["user_id"])
+
+    @app.post("/api/v1/reminders/suggestions/{order_id}/dismiss", tags=["reminders"])
+    def dismiss_reminder_suggestion(order_id: str, user: dict = Depends(current_user),
+                                    core: CopilotCore = Depends(get_core)) -> dict[str, Any]:
+        return _action_result(core.dismiss_reminder_suggestion(order_id, user["user_id"]))
+
+    @app.delete("/api/v1/reminders/suggestions/dismissed", tags=["reminders"])
+    def restore_reminder_suggestions(user: dict = Depends(current_user), core: CopilotCore = Depends(get_core)) -> dict[str, Any]:
+        return core.restore_reminder_suggestions(user["user_id"])
+
+    @app.get("/api/v1/reminders/export.ics", tags=["reminders"], response_class=PlainTextResponse)
+    def export_reminders(user: dict = Depends(current_user), core: CopilotCore = Depends(get_core)) -> PlainTextResponse:
+        return PlainTextResponse(core.reminders_ics(user["user_id"]), media_type="text/calendar; charset=utf-8",
+                                 headers={"Content-Disposition": 'attachment; filename="copilot-reminders.ics"'})
 
     @app.patch("/api/v1/reminders/{reminder_id}", tags=["reminders"])
     def update_reminder(

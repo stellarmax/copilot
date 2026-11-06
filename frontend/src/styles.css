@@ -421,7 +421,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 
 /* Reminders */
-.reminder-form { grid-template-columns: minmax(110px, .7fr) minmax(200px, 2fr) minmax(190px, 1fr) auto; }
+.reminder-form { grid-template-columns: minmax(110px, .7fr) minmax(200px, 2fr) minmax(190px, 1fr) minmax(120px, .6fr) auto; }
 .reminder-toggle { display: inline-flex; align-items: center; gap: 7px; color: #607168; font-size: 13px; cursor: pointer; }
 .reminder-table td:nth-child(3) { color: #2e4939; }
 .reminder-table .reminder-closed td { color: #9aa49d; }
@@ -579,3 +579,48 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .user-identity strong, .user-identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dialog-actions-split { gap: 8px; }
 .demo-info-body.auth-form { gap: 12px; padding: 16px 18px; }
+
+/* Sprint 3: reminders */
+.nav-badge { min-width: 19px; height: 19px; display: inline-grid; place-items: center; margin-left: auto; padding: 0 5px; border-radius: 10px; color: #fff; background: var(--coral); font-family: var(--mono); font-size: 10px; font-weight: 600; }
+.nav-link.active .nav-badge { color: #fff; }
+.bell-button { position: relative; width: 31px; height: 29px; display: inline-grid; place-items: center; border: 1px solid var(--line); border-radius: 4px; color: #3d5d50; background: #fff; }
+.bell-button:hover { border-color: #9eb9aa; }
+.bell-button.has-due { color: #8f2f22; border-color: #f0c1b6; background: #fff7f4; }
+.bell-badge { position: absolute; top: -6px; right: -6px; min-width: 17px; height: 17px; display: grid; place-items: center; padding: 0 4px; border-radius: 9px; color: #fff; background: var(--coral); font-family: var(--mono); font-size: 10px; font-weight: 600; }
+.page-intro .notify-state { display: inline-flex; align-items: center; gap: 6px; color: #7d8981; font-size: 12px; }
+.page-intro .notify-state.on { color: #3e6550; }
+.suggestion-panel { padding: 18px 20px 14px; border-left: 3px solid var(--lime-deep); }
+.suggestion-panel .panel-heading h2 { display: flex; align-items: center; gap: 8px; }
+.suggestion-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.suggestion-row { display: grid; grid-template-columns: 78px 1fr auto auto; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid #eef2ee; }
+.suggestion-copy { display: grid; gap: 2px; min-width: 0; color: #607168; font-size: 12px; }
+.suggestion-copy strong { color: #23392f; font-size: 13px; font-weight: 600; }
+.suggestion-reasons { color: #8f4a3a; }
+.suggestion-actions { display: flex; gap: 6px; white-space: nowrap; }
+.risk-chip { display: inline-flex; justify-content: center; padding: 2px 7px; border-radius: 3px; font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: .3px; }
+.risk-chip.risk-critical { color: #fff; background: #b34f3a; }
+.risk-chip.risk-high { color: #8f2f22; background: #fbe9e5; }
+.risk-chip.risk-medium { color: #7a5a14; background: #fbf2d9; }
+.risk-chip.risk-low { color: #3e6550; background: #ebf3ed; }
+.reminder-order-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; color: #7d8981; font-size: 11px; }
+.reminder-repeat { display: flex; align-items: center; gap: 4px; margin-top: 4px; color: #4f7262; font-size: 11px; }
+.reminder-claim { display: inline-block; margin-left: 8px; vertical-align: middle; }
+.reminder-hint { margin: 6px 0 0; color: #7a5a14; font-size: 12px; }
+.reminder-editing select, .reminder-form select { width: 100%; height: 34px; margin-top: 6px; padding: 0 8px; border: 1px solid #dce5de; border-radius: 4px; color: #253d32; background: #fff; font: inherit; font-size: 13px; }
+.reminder-form label select { height: 38px; margin-top: 0; }
+.reminder-table-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+.snooze-wrap { position: relative; display: inline-block; }
+.snooze-menu { position: absolute; z-index: 20; top: calc(100% + 4px); right: 0; min-width: 150px; display: grid; padding: 6px; border: 1px solid #dce5de; border-radius: 5px; background: #fff; box-shadow: 0 10px 28px rgb(9 28 22 / 14%); text-align: left; }
+.snooze-menu > span { padding: 4px 8px 6px; color: #8a978e; font-family: var(--mono); font-size: 10px; letter-spacing: .5px; text-transform: uppercase; }
+.snooze-menu button { padding: 7px 8px; border: 0; border-radius: 3px; color: #2e4939; background: transparent; cursor: pointer; font: inherit; font-size: 13px; text-align: left; }
+.snooze-menu button:hover { background: #f1f6f1; }
+.brief-follow-ups { margin-bottom: 14px; padding: 10px 12px; border: 1px solid #f0ddaf; border-radius: 5px; background: #fdf9ee; }
+.brief-follow-ups-head { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; color: #7a6334; font-size: 13px; }
+.brief-follow-ups-head .text-link { margin-left: auto; font-size: 12px; }
+.brief-follow-up { display: grid; grid-template-columns: 112px 74px 1fr; align-items: center; gap: 10px; padding: 5px 0; color: #3e5547; font-size: 13px; }
+@media (max-width: 760px) {
+  .suggestion-row { grid-template-columns: auto 1fr; }
+  .suggestion-actions, .suggestion-row .claim-badge { grid-column: 1 / -1; }
+  .brief-follow-up { grid-template-columns: auto 1fr; }
+  .brief-follow-up .due-note { grid-column: 1 / -1; }
+}

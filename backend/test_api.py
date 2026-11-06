@@ -293,6 +293,39 @@ class BackendApiTests(IsolatedAsyncioTestCase):
         unknown = await self.client.patch("/api/v1/reminders/REM-NOPE", json={"note": "x"})
         self.assertEqual(unknown.status_code, 404)
 
+    async def test_reminder_suggestions_calendar_export_and_brief(self):
+        from datetime import datetime, timedelta, timezone
+
+        suggestions = (await self.client.get("/api/v1/reminders/suggestions")).json()
+        self.assertEqual([item["order_id"] for item in suggestions["suggestions"]], ["ORD-101", "ORD-102"])
+        first = suggestions["suggestions"][0]
+        soon = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+        created = await self.client.post("/api/v1/reminders", json={
+            "order_id": first["order_id"], "note": first["suggested_note"], "remind_at": soon,
+            "repeat": "DAILY", "claim_id": first["claim_id"]})
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertEqual(created.json()["reminder"]["repeat"], "DAILY")
+        dismissed = await self.client.post("/api/v1/reminders/suggestions/ORD-102/dismiss")
+        self.assertEqual(dismissed.status_code, 200)
+        self.assertEqual((await self.client.get("/api/v1/reminders/suggestions")).json()["suggestions"], [])
+
+        exported = await self.client.get("/api/v1/reminders/export.ics")
+        self.assertEqual(exported.status_code, 200)
+        self.assertTrue(exported.headers["content-type"].startswith("text/calendar"))
+        self.assertIn("attachment", exported.headers["content-disposition"])
+        self.assertIn("RRULE:FREQ=DAILY", exported.text)
+
+        brief = (await self.client.post("/api/v1/brief", json={})).json()
+        self.assertEqual([item["order_id"] for item in brief["my_reminders"]], ["ORD-101"])
+
+        other = await self.signed_in_client("teammate@example.com")
+        self.assertNotIn("BEGIN:VEVENT", (await other.get("/api/v1/reminders/export.ics")).text)
+        self.assertEqual((await other.post("/api/v1/brief", json={})).json()["my_reminders"], [])
+        self.assertEqual(len((await other.get("/api/v1/reminders/suggestions")).json()["suggestions"]), 2)
+        anonymous = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://127.0.0.1")
+        self.clients.append(anonymous)
+        self.assertEqual((await anonymous.get("/api/v1/reminders/export.ics")).status_code, 401)
+
     async def test_switching_provider_requires_that_providers_key(self):
         encoded_key = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii")
         with patch.dict(os.environ, {"AI_CREDENTIALS_ENCRYPTION_KEY": encoded_key}):

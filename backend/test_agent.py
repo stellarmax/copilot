@@ -188,6 +188,33 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.core.manage_action("CONFIRM", "user", confirmation_token=token)
         self.assertEqual(len(self.core.list_reminders()), 1)
 
+    async def test_agent_lists_only_the_users_reminders_and_prepares_a_snooze(self):
+        from datetime import datetime, timedelta, timezone
+        from backend.app.agent.tools import execute_tool
+
+        soon = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        mine = self.core.create_reminder("ORD-101", "Check knitting", soon, owner_id="gm")["reminder"]
+        self.core.create_reminder("ORD-102", "Someone else's", soon, owner_id="other")
+        listed = execute_tool(self.core, "list_reminders", {}, owner_id="gm")
+        self.assertEqual([item["reminder_id"] for item in listed["data"]["reminders"]], [mine["reminder_id"]])
+        self.assertNotIn(mine["action_token"], json.dumps(listed))
+
+        later = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        service = AgentService(self.store, self.core, owner_id="gm")
+        provider = FakeProvider(tool_name="prepare_action", arguments={
+            "action_type": "reschedule_reminder", "reminder_id": mine["reminder_id"], "remind_at": later})
+        service.provider = lambda: provider
+        conversation = self.store.create_conversation("Reminders", "gm")
+        result = await service.run_turn(conversation["conversation_id"], "Snooze my ORD-101 reminder to tomorrow")
+        self.assertEqual(result["pending_actions"][0]["preview"]["action_type"], "reschedule_reminder")
+        self.assertEqual(self.core.get_reminder(mine["reminder_id"], "gm")["remind_at"], mine["remind_at"])  # not yet
+
+        for bad in ({"action_type": "reschedule_reminder", "order_id": "ORD-101", "text": "x", "remind_at": later},
+                    {"action_type": "complete_reminder", "reminder_id": mine["reminder_id"], "remind_at": later},
+                    {"action_type": "add_order_note", "order_id": "ORD-101", "text": "x", "repeat": "DAILY"}):
+            with self.assertRaises(ValueError):
+                execute_tool(self.core, "prepare_action", bad, owner_id="gm")
+
     async def test_opt_in_memory_is_added_as_non_evidence_context(self):
         self.store.set_memory_enabled(True)
         self.store.add_memory("Prefer concise answers")

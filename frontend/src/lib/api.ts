@@ -199,14 +199,34 @@ export interface PendingAction {
   confirmation_token: string;
   prepared_at: string;
   preview: {
-    action_type: "add_order_note" | "create_reminder" | "draft_chase_up_message";
+    action_type: "add_order_note" | "create_reminder" | "draft_chase_up_message" | "reschedule_reminder" | "complete_reminder";
     target: string;
-    payload: { note?: string; message?: string; remind_at?: string };
+    payload: {
+      note?: string;
+      message?: string;
+      remind_at?: string;
+      repeat?: ReminderRepeat;
+      reminder_id?: string;
+      reminder_note?: string;
+      current_remind_at?: string;
+    };
     claim_ids: string[];
   };
 }
 
 export type ReminderDueState = "OVERDUE" | "DUE_SOON" | "UPCOMING" | "DONE" | "CANCELLED";
+export type ReminderRepeat = "NONE" | "DAILY" | "WEEKLY";
+
+/** The reminder's order as it stands on the business date. Null if the order no longer exists. */
+export interface ReminderOrderContext {
+  customer: string;
+  status: string;
+  current_stage: string;
+  due_date: string;
+  days_to_due: number | null;
+  risk_level: string | null;
+  suggest_close: boolean;
+}
 
 export interface Reminder {
   reminder_id: string;
@@ -216,8 +236,35 @@ export interface Reminder {
   status: "ACTIVE" | "DONE" | "CANCELLED";
   source: string;
   due_state: ReminderDueState;
+  repeat: ReminderRepeat;
+  claim_id: string | null;
+  last_completed_at: string | null;
+  order_context: ReminderOrderContext | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ReminderSuggestion {
+  order_id: string;
+  customer: string;
+  product: string;
+  pieces: number;
+  current_stage: string;
+  due_date: string;
+  days_to_due: number;
+  risk_level: "HIGH" | "CRITICAL";
+  rules_triggered: string[];
+  reasons: string[];
+  suggested_note: string;
+  claim_id: string | null;
+}
+
+export interface ReminderSuggestions {
+  business_as_of_date: string;
+  suggestions: ReminderSuggestion[];
+  total_suggestions: number;
+  dismissed_count: number;
+  rule_notice: string;
 }
 
 export interface ChatMemory {
@@ -339,7 +386,7 @@ export function getNormality(targetDate: string, stage: string) {
 }
 
 export function generateBrief() {
-  return apiFetch<ToolEnvelope<BriefData>>("/api/v1/brief", {
+  return apiFetch<ToolEnvelope<BriefData> & { my_reminders: Reminder[] }>("/api/v1/brief", {
     method: "POST",
     body: JSON.stringify({}),
   });
@@ -401,7 +448,13 @@ export function getReminders(includeClosed = false) {
   return apiFetch<Reminder[]>(`/api/v1/reminders${includeClosed ? "?include_closed=true" : ""}`);
 }
 
-export function createReminder(input: { order_id: string; note: string; remind_at: string }) {
+export function createReminder(input: {
+  order_id: string;
+  note: string;
+  remind_at: string;
+  repeat?: ReminderRepeat;
+  claim_id?: string | null;
+}) {
   return apiFetch<{ status: string; reminder: Reminder }>("/api/v1/reminders", {
     method: "POST",
     body: JSON.stringify(input),
@@ -410,13 +463,28 @@ export function createReminder(input: { order_id: string; note: string; remind_a
 
 export function updateReminder(
   reminderId: string,
-  changes: Partial<{ order_id: string; note: string; remind_at: string; status: Reminder["status"] }>,
+  changes: Partial<{ order_id: string; note: string; remind_at: string; repeat: ReminderRepeat; status: Reminder["status"] }>,
 ) {
   return apiFetch<{ status: string; reminder: Reminder }>(`/api/v1/reminders/${encodeURIComponent(reminderId)}`, {
     method: "PATCH",
     body: JSON.stringify(changes),
   });
 }
+
+export function getReminderSuggestions() {
+  return apiFetch<ReminderSuggestions>("/api/v1/reminders/suggestions");
+}
+
+export function dismissReminderSuggestion(orderId: string) {
+  return apiFetch<{ status: string }>(`/api/v1/reminders/suggestions/${encodeURIComponent(orderId)}/dismiss`, { method: "POST" });
+}
+
+export function restoreReminderSuggestions() {
+  return apiFetch<{ restored_count: number }>("/api/v1/reminders/suggestions/dismissed", { method: "DELETE" });
+}
+
+/** Same-origin link, so the browser sends the session cookie and saves the file. */
+export const REMINDERS_ICS_URL = "/api/v1/reminders/export.ics";
 
 export function getActionAudit() {
   return apiFetch<ActionAuditRecord[]>("/api/v1/actions");

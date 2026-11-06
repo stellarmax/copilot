@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   Activity,
+  Bell,
   BellRing,
   Boxes,
   ChartNoAxesCombined,
@@ -46,6 +47,8 @@ const headings: Record<string, { title: string; kicker: string }> = {
 
 interface AppShellProps {
   user: User;
+  /** Active reminders whose time has come. */
+  dueCount: number;
   children: React.ReactNode;
 }
 
@@ -54,7 +57,7 @@ function initials(user: User): string {
   return words.slice(0, 2).map((word) => word[0].toUpperCase()).join("") || "?";
 }
 
-export function AppShell({ user, children }: AppShellProps) {
+export function AppShell({ user, dueCount, children }: AppShellProps) {
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -139,7 +142,9 @@ export function AppShell({ user, children }: AppShellProps) {
           {navigation.map(({ to, label, icon: Icon, end }) => (
             <NavLink key={to} to={to} end={end} className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} onClick={() => setMenuOpen(false)}>
               <Icon size={18} strokeWidth={1.8} aria-hidden="true" />
-              <span>{label}</span>            </NavLink>
+              <span>{label}</span>
+              {to === "/reminders" && dueCount > 0 && <span className="nav-badge" aria-label={`${dueCount} due`}>{dueCount}</span>}
+            </NavLink>
           ))}
         </nav>
         <div className="sidebar-bottom">
@@ -208,6 +213,15 @@ export function AppShell({ user, children }: AppShellProps) {
           <button className="icon-button mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={20} /></button>
           <div className="topbar-title"><span>{page.kicker}</span><h1>{page.title}</h1></div>
           <div className="topbar-meta">
+            <NavLink
+              to="/reminders"
+              className={`bell-button ${dueCount > 0 ? "has-due" : ""}`}
+              aria-label={dueCount > 0 ? `${dueCount} reminder${dueCount > 1 ? "s" : ""} due` : "Reminders"}
+              title={dueCount > 0 ? `${dueCount} reminder${dueCount > 1 ? "s" : ""} due` : "No reminders due"}
+            >
+              <Bell size={17} />
+              {dueCount > 0 && <span className="bell-badge">{dueCount}</span>}
+            </NavLink>
             <div className={`connection-pill ${health.isError ? "offline" : ""}`}>
               <span className="connection-dot" />
               {health.isLoading ? "Connecting" : health.isError ? "API offline" : "API connected"}

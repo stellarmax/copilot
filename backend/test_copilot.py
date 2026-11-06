@@ -90,6 +90,91 @@ class CopilotCoreTests(unittest.TestCase):
         self.assertEqual(again["status"], "REFUSED")
         self.assertEqual(len(self.core.list_reminders()), 1)
 
+    def test_repeating_reminder_moves_to_next_time_when_done(self):
+        from datetime import datetime, timedelta
+        weekly = self.core.create_reminder("ORD-101", "Weekly TrendCart check", self._future(hours=1), repeat="WEEKLY")
+        first = datetime.fromisoformat(weekly["reminder"]["remind_at"])
+        done = self.core.update_reminder(weekly["reminder"]["reminder_id"], {"status": "DONE"})["reminder"]
+        self.assertEqual(done["status"], "ACTIVE")
+        self.assertEqual(datetime.fromisoformat(done["remind_at"]), first + timedelta(weeks=1))
+        self.assertIsNotNone(done["last_completed_at"])
+        overdue_id = self.core.create_reminder("ORD-101", "Daily check", self._future(hours=1), repeat="DAILY")["reminder"]["reminder_id"]
+        self.core.conn.execute("UPDATE reminders SET remind_at=? WHERE reminder_id=?", (self._future(days=-3, hours=1), overdue_id))
+        caught_up = self.core.update_reminder(overdue_id, {"status": "DONE"})["reminder"]
+        self.assertEqual(caught_up["due_state"], "DUE_SOON")  # skips missed days to the next future time
+        stopped = self.core.update_reminder(done["reminder_id"], {"repeat": "NONE"})["reminder"]
+        self.assertEqual(self.core.update_reminder(stopped["reminder_id"], {"status": "DONE"})["reminder"]["status"], "DONE")
+        self.assertEqual(self.core.create_reminder("ORD-101", "x", self._future(days=1), repeat="HOURLY")["status"], "REFUSED")
+
+    def test_reminders_show_their_order_as_it_stands(self):
+        open_order = self.core.create_reminder("ORD-101", "Check", self._future(days=1))["reminder"]
+        self.assertEqual(open_order["order_context"]["risk_level"], "HIGH")
+        self.assertEqual(open_order["order_context"]["current_stage"], "KNITTING")
+        self.assertFalse(open_order["order_context"]["suggest_close"])
+        finished = self.core.create_reminder("ORD-104", "Confirm delivery", self._future(days=1))["reminder"]
+        self.assertTrue(finished["order_context"]["suggest_close"])
+
+    def test_risk_based_reminder_suggestions(self):
+        suggestions = self.core.suggest_reminders("gm")["suggestions"]
+        self.assertEqual([item["order_id"] for item in suggestions], ["ORD-101", "ORD-102"])  # sooner due date first
+        first = suggestions[0]
+        self.assertEqual(first["risk_level"], "HIGH")
+        self.assertEqual(first["reasons"], ["due in 3 days", "no progress for 7 working days"])
+        self.assertEqual(self.core.trace_claim(first["claim_id"])["status"], "OK")
+        # The suggested reminder keeps its evidence, and the order drops out of the suggestions.
+        created = self.core.create_reminder("ORD-101", first["suggested_note"], self._future(hours=18),
+                                            owner_id="gm", claim_id=first["claim_id"])
+        self.assertEqual(created["reminder"]["claim_id"], first["claim_id"])
+        self.assertEqual([item["order_id"] for item in self.core.suggest_reminders("gm")["suggestions"]], ["ORD-102"])
+        self.core.dismiss_reminder_suggestion("ORD-102", "gm")
+        self.assertEqual(self.core.suggest_reminders("gm")["suggestions"], [])
+        self.assertEqual(len(self.core.suggest_reminders("someone-else")["suggestions"]), 2)  # per user
+        self.core.restore_reminder_suggestions("gm")
+        self.assertEqual([item["order_id"] for item in self.core.suggest_reminders("gm")["suggestions"]], ["ORD-102"])
+        self.assertEqual(self.core.create_reminder("ORD-101", "x", self._future(days=1), claim_id="CLM-bogus")["status"], "REFUSED")
+
+    def test_reminders_export_as_icalendar(self):
+        self.core.create_reminder("ORD-101", "Call the line lead, then check knitting; urgent", self._future(days=1), repeat="DAILY")
+        ics = self.core.reminders_ics()
+        self.assertTrue(ics.startswith("BEGIN:VCALENDAR\r\n") and ics.endswith("END:VCALENDAR\r\n"))
+        self.assertIn("SUMMARY:Follow up ORD-101", ics)
+        self.assertIn("DESCRIPTION:Call the line lead\\, then check knitting\\; urgent", ics)
+        self.assertIn("RRULE:FREQ=DAILY", ics)
+        self.assertTrue(all(len(line.encode()) <= 75 for line in ics.split("\r\n")))
+        self.assertNotIn("BEGIN:VEVENT", self.core.reminders_ics("someone-else"))
+
+    def test_assistant_can_only_prepare_reminder_changes(self):
+        reminder = self.core.create_reminder("ORD-101", "Due in 3 days, check knitting", self._future(hours=2),
+                                             owner_id="gm")["reminder"]
+        later = self._future(days=2)
+        prepared = self.core.manage_action("PREPARE", "assistant", "reschedule_reminder", None,
+                                           {"reminder_id": reminder["reminder_id"], "remind_at": later}, owner_id="gm")
+        self.assertEqual(prepared["status"], "PREPARED")  # the reminder's own note needs no claim
+        self.assertEqual(prepared["preview"]["target"], "ORD-101")
+        self.assertEqual(self.core.get_reminder(reminder["reminder_id"], "gm")["remind_at"], reminder["remind_at"])
+        stranger = self.core.manage_action("CONFIRM", "user", confirmation_token=prepared["confirmation_token"], owner_id="other")
+        self.assertEqual(stranger["status"], "REFUSED")
+        self.core.manage_action("CONFIRM", "user", confirmation_token=prepared["confirmation_token"], owner_id="gm")
+        self.assertEqual(self.core.get_reminder(reminder["reminder_id"], "gm")["due_state"], "UPCOMING")
+
+        finish = self.core.manage_action("PREPARE", "assistant", "complete_reminder", None,
+                                         {"reminder_id": reminder["reminder_id"]}, owner_id="gm")
+        self.core.manage_action("CONFIRM", "user", confirmation_token=finish["confirmation_token"], owner_id="gm")
+        self.assertEqual(self.core.get_reminder(reminder["reminder_id"], "gm")["status"], "DONE")
+        closed = self.core.manage_action("PREPARE", "assistant", "complete_reminder", None,
+                                         {"reminder_id": reminder["reminder_id"]}, owner_id="gm")
+        self.assertEqual(closed["error"]["code"], "TARGET_NOT_RESOLVED")
+        foreign = self.core.manage_action("PREPARE", "assistant", "complete_reminder", None,
+                                          {"reminder_id": reminder["reminder_id"]}, owner_id="other")
+        self.assertEqual(foreign["status"], "REFUSED")
+
+    def test_reminder_overview_for_the_agent_hides_tokens(self):
+        self.core.create_reminder("ORD-101", "Check", self._future(hours=2), owner_id="gm")
+        overview = self.core.reminder_overview("gm")
+        self.assertEqual(overview["data"]["counts"], {"OVERDUE": 0, "DUE_SOON": 1, "UPCOMING": 0})
+        self.assertNotIn("action_token", overview["data"]["reminders"][0])
+        self.assertEqual(self.core.reminder_overview("other")["data"]["reminders"], [])
+
     def test_business_numbers_in_actions_still_need_claims(self):
         refused = self.core.manage_action("PREPARE", "assistant", "draft_chase_up_message", "ORD-101",
                                           {"message": "Your 800 pieces are 3 days late."})
