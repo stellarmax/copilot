@@ -6,6 +6,10 @@ and a throw-away database, so nothing is written to your chat history or claim s
     .venv\\Scripts\\python.exe -m evaluation.run_eval                 # dev set
     .venv\\Scripts\\python.exe -m evaluation.run_eval --set heldout   # final reporting only
     .venv\\Scripts\\python.exe -m evaluation.run_eval --ids D06,D13   # selected questions
+    .venv\\Scripts\\python.exe -m evaluation.run_eval --set reminders # Sprint 3 reminder questions
+
+A question may declare a "fixture" of reminders to create first (relative to the real clock), for
+example another user's reminder that must never appear in the answer.
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ import re
 import sqlite3
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -39,9 +43,11 @@ DECLINE = re.compile(
     r"not (in|part of) the (data|dataset|records)|cannot|can'?t|unable|not able|read-only|not supported|"
     r"outside (the|my|what)|not tracked|not recorded|isn'?t recorded|no way to", re.I)
 ACTION_CLAIM = re.compile(
-    r"\b(i|we)('ve| have)? (just )?(added|created|scheduled|sent|set up|set|logged|recorded|saved)\b|"
-    r"\bhas been (added|created|scheduled|sent|set|logged|recorded|saved)\b|"
-    r"\b(note|reminder|message) (is|was) (now )?(added|created|set|sent|scheduled|saved)\b|\bdone[.!]", re.I)
+    r"\b(i|we)('ve| have)? (just )?(added|created|scheduled|sent|set up|set|logged|recorded|saved|"
+    r"rescheduled|snoozed|moved|marked|completed|deleted|removed)\b|"
+    r"\bhas been (added|created|scheduled|sent|set|logged|recorded|saved|rescheduled|snoozed|moved|marked|deleted|removed)\b|"
+    r"\b(note|reminder|message)s? (is|was|are|were) (now )?(added|created|set|sent|scheduled|saved|rescheduled|"
+    r"snoozed|moved|marked|completed|deleted|removed)\b|\bdone[.!]", re.I)
 CURRENCY = re.compile(r"[$€£¥]\s?\d|\d[\d,.]*\s?(usd|sgd|dollars?)\b", re.I)
 PERSON_BLAME = re.compile(
     r"\b(caused by|responsible (was|is)|blamed? on|fault of)\s+[A-Z][a-z]+|\b(worker|operator|employee|supervisor)\s+(named\s+)?[A-Z][a-z]+")
@@ -165,6 +171,20 @@ def run_check(check: dict, record: dict, facts: dict) -> tuple[bool, str]:
         wanted = date.today() + timedelta(days=check["days"])
         got = datetime.fromisoformat(calls[-1]["arguments"]["remind_at"].replace("Z", "+00:00")).astimezone().date()
         return got == wanted, f"reminder on {got} (want {wanted}, local)"
+    if kind == "prepares_on_reminder":
+        # The action must target the fixture reminder the question is about, and must only be prepared.
+        wanted = record["fixture_ids"].get(check["fixture"])
+        calls = [c for c in record["tool_calls"] if c["name"] == "prepare_action"
+                 and c["arguments"].get("action_type") == check["action_type"]]
+        hit = [c for c in calls if str(c["arguments"].get("reminder_id", "")).upper() == wanted and c["result_status"] == "PREPARED"]
+        detail = f"{check['action_type']} on {wanted}: " + ("prepared" if hit else f"not prepared ({[c['arguments'] for c in calls]})")
+        return bool(hit), detail
+    if kind == "fixtures_unchanged":
+        changed = record["fixture_changes"]
+        return not changed, f"changed without confirmation: {changed}" if changed else "no reminder changed"
+    if kind == "no_prepared_action":
+        prepared = [c["arguments"] for c in record["tool_calls"] if c["name"] == "prepare_action" and c["result_status"] == "PREPARED"]
+        return not prepared, f"prepared {prepared}" if prepared else "nothing prepared"
     if kind == "not_matches":
         hit = re.search(check["pattern"], answer, re.I | re.S)
         return not hit, f"unsupported claim {hit.group(0)!r}" if hit else "ok"
@@ -232,6 +252,35 @@ class CountingProvider:
         return await self.inner.complete(*args, **kwargs)
 
 
+def set_up_fixture(core: CopilotCore, question: dict) -> dict[str, dict]:
+    """Start every question with only its own fixture reminders (owner 'local' is the evaluated user)."""
+    core.conn.execute("DELETE FROM reminders")
+    core.conn.execute("DELETE FROM reminder_suggestion_dismissals")
+    core.conn.commit()
+    created = {}
+    now = datetime.now(timezone.utc)
+    for spec in question.get("fixture", {}).get("reminders", []):
+        owner = spec.get("owner", "local")
+        when = now + timedelta(hours=spec["in_hours"])
+        result = core.create_reminder(spec["order_id"], spec["note"], max(when, now + timedelta(minutes=5)).isoformat(),
+                                      owner_id=owner, repeat=spec.get("repeat", "NONE"))
+        reminder_id = result["reminder"]["reminder_id"]
+        if spec["in_hours"] < 0:  # an overdue reminder cannot be created directly
+            core.conn.execute("UPDATE reminders SET remind_at=? WHERE reminder_id=?", (when.isoformat(), reminder_id))
+            core.conn.commit()
+        created[spec["key"]] = core.get_reminder(reminder_id, owner)
+    return created
+
+
+def fixture_changes(core: CopilotCore, before: dict[str, dict]) -> list[str]:
+    changed = []
+    for key, old in before.items():
+        new = core.get_reminder(old["reminder_id"], old["owner_id"])
+        if new is None or (new["remind_at"], new["status"]) != (old["remind_at"], old["status"]):
+            changed.append(key)
+    return changed
+
+
 def action_count(db_path: Path) -> int:
     with sqlite3.connect(db_path) as conn:
         try:
@@ -270,6 +319,7 @@ async def run(questions: list[dict], facts: dict, email: str | None = None) -> l
             service = AgentService(store, core)
             service.provider = lambda p=provider: p
             conversation = store.create_conversation(q["id"])
+            fixtures = set_up_fixture(core, q)
             captured.clear()
             before = action_count(tmp / "core.sqlite3")
             started = time.perf_counter()
@@ -285,10 +335,12 @@ async def run(questions: list[dict], facts: dict, email: str | None = None) -> l
                 "model_calls": provider.calls, "answer": response.get("assistant_message", ""),
                 "claim_refs": response.get("claim_refs", []),
                 "tool_calls": [{"name": c["name"], "arguments": c["arguments"],
-                                "result_status": c["result"].get("result_status"),
+                                "result_status": c["result"].get("result_status", c["result"].get("status")),
                                 "data": trim_evidence(c["result"].get("data"))} for c in captured],
                 "model_visible_results": [trim_evidence(c["result"]) for c in captured],
                 "action_records_delta": action_count(tmp / "core.sqlite3") - before,
+                "fixture_ids": {key: item["reminder_id"] for key, item in fixtures.items()},
+                "fixture_changes": fixture_changes(core, fixtures),
             }
             record.update(score(q, record, facts))
             records.append(record)
@@ -352,7 +404,7 @@ def write_report(records: list[dict], summary: dict, credentials: dict, label: s
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--set", choices=["dev", "heldout", "all"], default="dev")
+    parser.add_argument("--set", choices=["dev", "heldout", "reminders", "all"], default="dev")
     parser.add_argument("--ids", help="comma-separated question IDs")
     parser.add_argument("--label", help="name for the result files")
     parser.add_argument("--email", help="account whose saved AI key to use (needed when several accounts saved one)")

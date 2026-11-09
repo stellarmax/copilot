@@ -1308,7 +1308,9 @@ class CopilotCore:
 
     def reminder_overview(self, owner_id: str = "local", include_closed: bool = False) -> dict[str, Any]:
         """The user's reminders for the chat agent: no tokens, plus counts the model must not work out itself."""
+        # Local wall-clock time is given so the model never converts time zones itself.
         reminders = [{key: value for key, value in item.items() if key != "action_token"}
+                     | {"remind_at_local": datetime.fromisoformat(item["remind_at"]).astimezone().strftime("%a %d %b %Y %H:%M")}
                      for item in self.list_reminders(include_closed, owner_id)]
         counts = {state: sum(1 for item in reminders if item["due_state"] == state)
                   for state in ("OVERDUE", "DUE_SOON", "UPCOMING")}

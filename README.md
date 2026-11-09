@@ -6,6 +6,16 @@ An operations assistant for the general manager of SweaterCo, a sweater factory.
 
 **Design principle:** the LLM interprets, deterministic tools calculate, and every claim is traceable.
 
+## Features
+
+| Area | What it does |
+|---|---|
+| Overview | Deterministic morning brief (top priorities, plus your follow-ups due today), due reminders, stage throughput, order pulse |
+| Orders / Production / Feasibility | Order search, factory-wide output with missing days flagged, new-order feasibility with outsourcing options |
+| AI chat | Answers through 9 allowlisted tools; every number comes from the core and links to re-verifiable evidence; actions are prepared, never executed, until you click **Confirm** |
+| Reminders | Risk-based follow-up suggestions with evidence; snooze and daily/weekly repeat; each reminder shows its order's stage, risk and days to due date; bell count and desktop notifications while the app is open; `.ics` calendar export; manage reminders from the chat |
+| Accounts | E-mail sign-in with invite-only registration. Each account uses its own AI key; chats, memories, reminders and the action log are private. Signed out, every page opens without data or AI |
+
 ## Repository layout
 
 | Path | Contents |
@@ -14,7 +24,7 @@ An operations assistant for the general manager of SweaterCo, a sweater factory.
 | `frontend/` | React + TypeScript + Vite web app |
 | `data/` | Course-provided dataset (orders, production log, workshops); the app's default data |
 | `demo_data/` | Small fixture dataset used by the automated tests |
-| `evaluation/` | 36-question evaluation set, independent answer key, runner and failure analysis (run logs are generated locally) |
+| `evaluation/` | 36-question evaluation set plus 8 Sprint 3 reminder questions, independent answer key, runner and failure analysis (run logs are generated locally) |
 | `docs/` | Local setup guides (EN/ZH) and deployment guides (Cloudflare Tunnel on your PC; Oracle Cloud VM) |
 | `scripts/` | Production start script |
 

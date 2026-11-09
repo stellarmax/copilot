@@ -181,7 +181,7 @@ The Orders, Production, Feasibility and other pages work without AI. The AI chat
    | Gemini (Google) | <https://aistudio.google.com/apikey> |
    | DeepSeek | <https://platform.deepseek.com/api_keys> |
 
-2. Open the web app. The first time, click **Create an account** and register with your e-mail and a password (at least 8 characters). No invite code is needed on your own computer. Then click **AI settings** in the left sidebar.
+2. Open the web app. You can look around before signing in, but pages show no data. The first time, click **Sign in**, then **Create an account**, and register with your e-mail and a password (at least 8 characters). No invite code is needed on your own computer. Then click **AI settings** in the left sidebar.
 3. Choose the **AI provider**, then a **Model**. Each provider's first model is the recommended default.
 4. Paste your key into **API key** and click **Save settings**.
 5. Click **Test connection**. *AI provider connection succeeded.* means it works.
@@ -239,7 +239,7 @@ No API key is saved yet. Follow step 4.
 - **400 / 404:** your account may not have access to that model. Try another model.
 
 **Q11: I want to clear all demo records and start fresh.**
-Stop the backend, delete `backend/.frontend-demo.sqlite3`, and start the backend again. This clears action records, chats, AI settings and memories, so you'll need to enter your API key again.
+Stop the backend, delete `backend/.frontend-demo.sqlite3`, and start the backend again. This clears all accounts, action records, reminders, chats, AI settings and memories, so you'll need to register and enter your API key again.
 
 **Q12: Can teammates open the app on my computer over the LAN?**
 Not by default: the servers listen on `127.0.0.1` only. To share one copy, follow the deployment guide (`docs/DEPLOY_CLOUDFLARE_ZH.md`): teammates then register with the invite code and each uses their own API key. Chats, reminders and the action log are private to each account.
@@ -252,5 +252,5 @@ There is no password reset. Register again with another e-mail, or delete `backe
 
 - The app uses the **course-provided data** in `data/`, with the business date fixed at 2026-04-01.
 - All services listen only on this computer (`127.0.0.1`). Do not expose them to a LAN or the internet.
-- The AI can **prepare** reminders, order notes and chase-up drafts, but nothing happens until you click **Confirm** on the card in the chat. Chase-up drafts are **never** actually sent, and reminders are shown in the app only (using your computer's real clock).
+- The AI can **prepare** reminders, order notes and chase-up drafts, but nothing happens until you click **Confirm** on the card in the chat. Chase-up drafts are **never** actually sent. Reminders use your computer's real clock; while the app is open you get a bell count and, if you turn them on, desktop notifications. Nothing is e-mailed.
 - The backend calculates every number. Click **Evidence** at the end of an answer to see how a result was calculated.

@@ -180,7 +180,7 @@ npm run dev
    | Gemini (Google) | <https://aistudio.google.com/apikey> |
    | DeepSeek | <https://platform.deepseek.com/api_keys> |
 
-2. 打开网页。第一次使用时点 **Create an account**，用邮箱和密码（至少 8 位）注册；在自己电脑上注册不需要邀请码。然后在网页左侧点 **AI settings**。
+2. 打开网页。登录前也能浏览各页面，但没有数据。第一次使用时点 **Sign in**，再点 **Create an account**，用邮箱和密码（至少 8 位）注册；在自己电脑上注册不需要邀请码。然后在网页左侧点 **AI settings**。
 3. **AI provider**：选择厂家；**Model**：选择模型（每家的第一个模型都是推荐的默认选项）。
 4. **API key**：粘贴你的 key，点 **Save settings**。
 5. 点 **Test connection**，显示 *AI provider connection succeeded.* 就成功了。
@@ -244,7 +244,7 @@ npm config set registry https://registry.npmmirror.com
 - **400 / 404**：你的账号可能没有这个模型的权限，换一个模型试试。
 
 **Q11：想清空所有演示记录，重新开始。**
-停止后端，删除 `backend/.frontend-demo.sqlite3`，再重新启动后端。这会清空动作记录、聊天记录、AI 设置和记忆，API key 需要重新填。
+停止后端，删除 `backend/.frontend-demo.sqlite3`，再重新启动后端。这会清空所有账号、动作记录、提醒、聊天记录、AI 设置和记忆，需要重新注册并填写 API key。
 
 **Q12：能不能让同学通过局域网访问我的电脑？**
 默认不行，服务只监听 `127.0.0.1`。如果想共用一份，请按部署指南（`docs/DEPLOY_CLOUDFLARE_ZH.md`）操作：同学用邀请码注册，各自填自己的 API key；聊天、提醒和动作记录按账号隔离。
@@ -257,5 +257,5 @@ npm config set registry https://registry.npmmirror.com
 
 - 页面使用 `data/` 中的**课程提供数据**，业务日期固定为 2026-04-01。
 - 所有服务只监听本机地址（`127.0.0.1`），请勿开放到局域网或公网。
-- AI 可以帮你**准备**提醒、订单备注和催单草稿，但只有你在聊天卡片上点 **Confirm** 才会执行。催单草稿**永远不会**真的发出去，提醒只在网页里显示（使用电脑的真实时间）。
+- AI 可以帮你**准备**提醒、订单备注和催单草稿，但只有你在聊天卡片上点 **Confirm** 才会执行。催单草稿**永远不会**真的发出去。提醒使用电脑的真实时间；网页开着时会在铃铛上显示数量，打开桌面通知后还会弹窗提醒，不会发邮件。
 - 所有数字都由后端确定性计算；回答末尾的 **Evidence** 可以点开查看计算依据。
