@@ -13,13 +13,12 @@ import { OverviewPage } from "./features/OverviewPage";
 import { ProductionPage } from "./features/ProductionPage";
 import { RemindersPage } from "./features/RemindersPage";
 import { SignInPage } from "./features/SignInPage";
-import { getCurrentUser, SIGNED_OUT_EVENT, type User } from "./lib/api";
+import { getCurrentUser, setSessionActive, SIGNED_OUT_EVENT, type User } from "./lib/api";
 import { switchUser } from "./lib/session";
 import { useDueReminders } from "./lib/useDueReminders";
 
 export default function App() {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const me = useQuery({ queryKey: ["me"], queryFn: getCurrentUser, retry: false, staleTime: Infinity });
 
   useEffect(() => {
@@ -31,30 +30,34 @@ export default function App() {
 
   if (me.isPending) return <div className="auth-page" aria-busy="true" />;
   if (me.isError) return <div className="auth-page"><p className="auth-loading-error">{me.error.message}</p></div>;
-  if (!me.data) return <SignInPage onSignedIn={(user, isNewAccount) => {
-    switchUser(queryClient, user);
-    // A new account has no AI key yet: start on AI settings with a welcome note.
-    if (isNewAccount) navigate("/settings", { state: { welcome: true } });
-  }} />;
-  return <Workspace user={me.data} />;
+  // Set before any page renders, so signed-out pages never send data requests.
+  setSessionActive(Boolean(me.data));
+  return (
+    <Routes>
+      <Route path="/signin" element={<SignInPage signedIn={Boolean(me.data)} onSignedIn={(user) => switchUser(queryClient, user)} />} />
+      <Route path="*" element={<Workspace user={me.data ?? null} />} />
+    </Routes>
+  );
 }
 
-function Workspace({ user }: { user: User }) {
+/** The app layout. Signed out (user = null), every page is open but shows no data and the AI never runs. */
+function Workspace({ user }: { user: User | null }) {
   const [claimId, setClaimId] = useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const isChatRoute = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
   // Lives above both layouts so reminders still notify while the full-screen chat is open.
-  const { due } = useDueReminders();
-  const notifier = <ReminderNotifier due={due} userId={user.user_id} />;
+  const { due } = useDueReminders(user !== null);
+
+  const notifier = user && <ReminderNotifier due={due} userId={user.user_id} />;
 
   if (isChatRoute) {
     return (
       <>
         {notifier}
         <Routes>
-          <Route path="/chat" element={<ChatPage onTrace={setClaimId} />} />
-          <Route path="/chat/:conversationId" element={<ChatPage onTrace={setClaimId} />} />
+          <Route path="/chat" element={<ChatPage onTrace={setClaimId} signedIn={user !== null} />} />
+          <Route path="/chat/:conversationId" element={<ChatPage onTrace={setClaimId} signedIn={user !== null} />} />
           <Route path="*" element={<Navigate to="/chat" replace />} />
         </Routes>
         <TraceDrawer claimId={claimId} onClose={() => setClaimId(null)} />
@@ -65,7 +68,7 @@ function Workspace({ user }: { user: User }) {
   return (
     <>
       {notifier}
-      <AppShell user={user} dueCount={due.length}>
+      <AppShell user={user} dueCount={user ? due.length : 0}>
         <Routes>
           <Route path="/" element={<OverviewPage onTrace={setClaimId} onAsk={(message) => navigate("/chat", { state: { initialMessage: message } })} />} />
           <Route path="/orders" element={<OrdersPage onTrace={setClaimId} />} />

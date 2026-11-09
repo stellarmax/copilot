@@ -13,7 +13,7 @@ export function AuditPage() {
   const query = useQuery({ queryKey: ["action-audit"], queryFn: getActionAudit });
   return (
     <div className="page-stack">
-      <section className="page-intro"><div><span className="eyebrow">LOCAL SQLITE LEDGER</span><p>Prepared actions, confirmations and cancellations recorded by this demo instance.</p></div><span className="local-only-tag"><FileClock size={15} /> LOCAL RECORDS</span></section>
+      <section className="page-intro"><div><span className="eyebrow">YOUR ACTION LEDGER</span><p>Actions you prepared, confirmed or cancelled, including reminders and notes made through the AI chat.</p></div><span className="local-only-tag"><FileClock size={15} /> PRIVATE TO YOUR ACCOUNT</span></section>
       <section className="panel table-panel">
         <div className="panel-heading table-heading"><div><span className="eyebrow">ACTION HISTORY</span><h2>{query.data?.length ?? "—"} <small>entries</small></h2></div></div>
         {query.isLoading && <LoadingState label="Loading action log" />}
@@ -29,7 +29,7 @@ export function AuditPage() {
           </table></div>
         )}
       </section>
-      <div className="notice-strip"><span>!</span><p>This ledger records local effects only. It does not send messages or schedule reminders/watch jobs. This endpoint is unauthenticated; keep this demo on a trusted machine or network.</p></div>
+      <div className="notice-strip"><span>!</span><p>This ledger records what happened inside the app only; nothing is ever sent to customers or anyone else. Each account sees only its own entries.</p></div>
     </div>
   );
 }

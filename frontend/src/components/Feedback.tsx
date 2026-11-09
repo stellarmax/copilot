@@ -1,4 +1,6 @@
-import { AlertCircle, LoaderCircle } from "lucide-react";
+import { AlertCircle, LoaderCircle, LockKeyhole, LogIn } from "lucide-react";
+import { Link, useLocation } from "react-router-dom";
+import { SIGN_IN_MESSAGE } from "../lib/api";
 
 export function LoadingState({ label = "Loading data" }: { label?: string }) {
   return (
@@ -9,7 +11,20 @@ export function LoadingState({ label = "Loading data" }: { label?: string }) {
   );
 }
 
+/** Shown instead of data while signed out: neutral, with a way to sign in and come back here. */
+export function SignInNotice({ message = SIGN_IN_MESSAGE }: { message?: string }) {
+  const location = useLocation();
+  return (
+    <div className="sign-in-notice" role="status">
+      <LockKeyhole size={16} aria-hidden="true" />
+      <span>{message}</span>
+      <Link className="button button-primary button-small" to="/signin" state={{ from: location.pathname }}><LogIn size={14} /> Sign in</Link>
+    </div>
+  );
+}
+
 export function ErrorState({ message }: { message: string }) {
+  if (message === SIGN_IN_MESSAGE) return <SignInNotice />;
   return (
     <div className="error-state" role="alert">
       <AlertCircle size={17} aria-hidden="true" />

@@ -6,7 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AlarmClock, ArrowLeft, ArrowRight, BellRing, Bot, Check, CircleAlert, CircleCheck, LoaderCircle, Mail, MessageSquarePlus, NotebookPen, Plus, Send, ShieldCheck, Trash2, UserRound, X } from "lucide-react";
 import { ClaimBadge } from "../components/ClaimBadge";
-import { ErrorState } from "../components/Feedback";
+import { ErrorState, SignInNotice } from "../components/Feedback";
 import {
   cancelAction,
   confirmAction,
@@ -193,7 +193,7 @@ function AssistantContent({ message, onTrace, onClarify }: {
   );
 }
 
-export function ChatPage({ onTrace }: { onTrace: (claimId: string) => void }) {
+export function ChatPage({ onTrace, signedIn = true }: { onTrace: (claimId: string) => void; signedIn?: boolean }) {
   const { conversationId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -227,7 +227,12 @@ export function ChatPage({ onTrace }: { onTrace: (claimId: string) => void }) {
     },
   });
 
+  // Reset only when the URL really switches conversation. React's development double-run of
+  // effects would otherwise wipe a question that was sent straight away from the Overview.
+  const shownConversation = useRef(conversationId);
   useEffect(() => {
+    if (shownConversation.current === conversationId) return;
+    shownConversation.current = conversationId;
     setActiveId(conversationId ?? null);
     setOptimisticMessages([]);
   }, [conversationId]);
@@ -333,7 +338,7 @@ export function ChatPage({ onTrace }: { onTrace: (claimId: string) => void }) {
         <header className="chat-topbar">
           <button className="icon-button chat-history-toggle" onClick={() => setShowHistory(!showHistory)} aria-label="Toggle conversation history"><MessageSquarePlus size={18} /></button>
           <div className="chat-agent-mark"><Bot size={17} /></div>
-          <div className="chat-agent-heading"><strong>Operations assistant</strong><span><i /> {aiSettings.data?.has_api_key ? "Provider configured" : "AI not configured"}</span></div>
+          <div className="chat-agent-heading"><strong>Operations assistant</strong><span><i /> {!signedIn ? "Sign in to use" : aiSettings.data?.has_api_key ? "Provider configured" : "AI not configured"}</span></div>
           <Link to="/settings" className="chat-settings-link">AI settings</Link>
           <Link to="/" className="chat-exit-link">Exit <X size={15} /></Link>
         </header>
@@ -345,7 +350,8 @@ export function ChatPage({ onTrace }: { onTrace: (claimId: string) => void }) {
               <span className="eyebrow">FIELDWORK AI PREVIEW</span>
               <h1>What should we<br /><em>look into?</em></h1>
               <p>Ask about current orders, factory output, delivery risk or a proposed order. Answers use configured tools and carry evidence links.</p>
-              {!aiSettings.data?.has_api_key && <div className="chat-setup-callout"><CircleAlert size={16} /><span>Configure a provider API key in <Link to="/settings">AI settings</Link> before sending a question.</span></div>}
+              {!signedIn && !sendError && <SignInNotice />}
+              {signedIn && !aiSettings.data?.has_api_key && <div className="chat-setup-callout"><CircleAlert size={16} /><span>Configure a provider API key in <Link to="/settings">AI settings</Link> before sending a question.</span></div>}
             </section>
           )}
           {messages.map((message, index) => (

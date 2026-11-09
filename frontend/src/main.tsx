@@ -8,11 +8,13 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
+import { isSignInRequired } from "./lib/api";
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      // Never retry a request that only failed because nobody is signed in.
+      retry: (failureCount, error) => !isSignInRequired(error) && failureCount < 1,
       staleTime: 15_000,
       refetchOnWindowFocus: false,
     },

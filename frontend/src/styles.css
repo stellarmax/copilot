@@ -194,6 +194,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .filter-form input, .filter-form select, .scenario-form input, .scenario-form select { width: 100%; height: 37px; padding: 0 9px; border: 1px solid #dce5de; border-radius: 4px; color: #253d32; background: #fff; font-size: 13px; }
 .filter-form input::placeholder { color: #a0aaa4; }
 .table-panel { padding-bottom: 0; }
+/* The table runs to the panel's bottom edge; anything shown instead of it needs its own space. */
+.table-panel > .sign-in-notice, .table-panel > .error-state, .table-panel > .feedback-line { margin-bottom: 20px; }
 .table-heading { align-items: center; margin-bottom: 9px; }
 .table-total { display: grid; justify-items: end; gap: 4px; color: #89958e; font-size: 12px; }
 .table-total strong { color: #264337; font-family: var(--mono); font-size: 15px; font-weight: 500; }.table-total small { color: #829087; font-family: "DM Sans Variable", sans-serif; font-size: 12px; }
@@ -624,3 +626,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .brief-follow-up { grid-template-columns: auto 1fr; }
   .brief-follow-up .due-note { grid-column: 1 / -1; }
 }
+
+/* Signed-out workspace */
+.guest-sign-in { margin-left: auto; text-decoration: none; }
+.auth-back { display: inline-flex; margin-bottom: 18px; font-size: 12px; }
+.sign-in-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-height: 54px; padding: 10px 12px 10px 14px; border: 1px solid #d8e6c4; border-radius: 5px; color: #3e5547; background: #f6faee; font-size: 13px; line-height: 1.5; }
+.sign-in-notice svg { flex: 0 0 auto; color: #5c7d3a; }
+.sign-in-notice .button { margin-left: auto; text-decoration: none; }
+.chat-welcome .sign-in-notice { max-width: 560px; margin-top: 18px; text-align: left; }
+.sign-in-notice + .notice-strip, .sign-in-notice + .error-state { margin-top: 12px; }
+.page-intro > .button { flex: 0 0 auto; white-space: nowrap; }
+a.button { text-decoration: none; }

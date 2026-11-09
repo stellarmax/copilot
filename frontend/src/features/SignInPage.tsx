@@ -1,11 +1,18 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { KeyRound, LogIn, UserPlus } from "lucide-react";
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { ArrowLeft, KeyRound, LogIn, UserPlus } from "lucide-react";
 import { ErrorState } from "../components/Feedback";
 import { register, signIn, type User } from "../lib/api";
 
-export function SignInPage({ onSignedIn }: { onSignedIn: (user: User, isNewAccount: boolean) => void }) {
-  const [mode, setMode] = useState<"sign-in" | "register">("sign-in");
+export function SignInPage({ signedIn, onSignedIn }: { signedIn: boolean; onSignedIn: (user: User) => void }) {
+  const [params] = useSearchParams();
+  // Set while a successful sign-in is navigating away, so the redirect below cannot override it.
+  const leaving = useRef(false);
+  const navigate = useNavigate();
+  // The page the visitor came from, so signing in takes them straight back to it.
+  const from = (useLocation().state as { from?: string } | null)?.from ?? "/";
+  const [mode, setMode] = useState<"sign-in" | "register">(params.get("mode") === "register" ? "register" : "sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -14,7 +21,13 @@ export function SignInPage({ onSignedIn }: { onSignedIn: (user: User, isNewAccou
     mutationFn: () => mode === "sign-in"
       ? signIn({ email, password })
       : register({ email, password, display_name: displayName, invite_code: inviteCode || undefined }),
-    onSuccess: (user) => onSignedIn(user, mode === "register"),
+    onSuccess: (user) => {
+      leaving.current = true;
+      // A new account has no AI key yet: start on AI settings with a welcome note.
+      if (mode === "register") navigate("/settings", { replace: true, state: { welcome: true } });
+      else navigate(from, { replace: true });
+      onSignedIn(user);
+    },
   });
   const registering = mode === "register";
 
@@ -28,9 +41,12 @@ export function SignInPage({ onSignedIn }: { onSignedIn: (user: User, isNewAccou
     setMode(registering ? "sign-in" : "register");
   }
 
+  if (signedIn && !leaving.current) return <Navigate to="/" replace />;
+
   return (
     <div className="auth-page">
       <section className="auth-card panel">
+        <Link className="auth-back text-link" to={from}><ArrowLeft size={14} /> Back to the workspace</Link>
         <div className="auth-brand">
           <div className="brand-mark"><span>F</span></div>
           <div><strong>FIELDWORK</strong><small>OPERATIONS CO-PILOT</small></div>

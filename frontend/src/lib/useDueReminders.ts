@@ -8,8 +8,8 @@ import { getReminders, type Reminder } from "./api";
  * Polling alone would show a reminder up to a minute late, so a timer also wakes exactly when the
  * next reminder comes due.
  */
-export function useDueReminders(): { reminders: Reminder[]; due: Reminder[] } {
-  const reminders = useQuery({ queryKey: ["reminders", false], queryFn: () => getReminders(false), refetchInterval: 60_000 });
+export function useDueReminders(enabled = true): { reminders: Reminder[]; due: Reminder[] } {
+  const reminders = useQuery({ queryKey: ["reminders", false], queryFn: () => getReminders(false), refetchInterval: 60_000, enabled });
   const [now, setNow] = useState(() => Date.now());
   const active = reminders.data ?? [];
 

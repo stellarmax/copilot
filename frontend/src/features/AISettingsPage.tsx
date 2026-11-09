@@ -139,8 +139,8 @@ export function AISettingsPage() {
           </span>
         </div>
         {(settings.isLoading || catalog.isLoading) && <LoadingState label="Loading AI settings" />}
-        {settings.error && <ErrorState message={settings.error.message} />}
-        {catalog.error && <ErrorState message={catalog.error.message} />}
+        {/* Both requests fail the same way when signed out; show the message once. */}
+        {(settings.error ?? catalog.error) && <ErrorState message={(settings.error ?? catalog.error)!.message} />}
         {settings.data && catalog.data && (
           <form className="ai-settings-form" onSubmit={submitSettings}>
             <div className="provider-selection">

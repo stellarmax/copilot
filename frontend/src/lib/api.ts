@@ -289,10 +289,27 @@ export interface User {
   display_name: string;
 }
 
-/** Fired when the session has expired, so the app can return to the sign-in page. */
+/** Fired when the session has expired, so the app can switch to the signed-out view. */
 export const SIGNED_OUT_EVENT = "copilot:signed-out";
 
+/** What signed-out visitors see wherever data or the AI assistant would be. */
+export const SIGN_IN_MESSAGE = "Sign in to see data and use the AI assistant.";
+
+let sessionActive = true;
+
+/** Signed out, data requests are not sent at all; pages show the sign-in prompt instead. */
+export function setSessionActive(active: boolean) {
+  sessionActive = active;
+}
+
+export function isSignInRequired(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401;
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  if (!sessionActive && path.startsWith("/api/") && !path.startsWith("/api/v1/auth/")) {
+    throw new ApiError(SIGN_IN_MESSAGE, 401);
+  }
   let response: Response;
   try {
     response = await fetch(path, {
@@ -306,7 +323,10 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     if (response.status === 401 && !path.startsWith("/api/v1/auth/")) {
+      // Only an expired session lands here: signed-out requests are stopped above.
+      sessionActive = false;
       window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+      throw new ApiError(SIGN_IN_MESSAGE, 401);
     }
     const detail = typeof payload === "object" && payload !== null && "detail" in payload
       ? (payload as { detail: unknown }).detail

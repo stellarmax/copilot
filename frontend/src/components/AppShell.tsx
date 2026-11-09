@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { NavLink, useLocation } from "react-router-dom";
+import { Link as RouterLink, NavLink, useLocation } from "react-router-dom";
 import {
   Activity,
   Bell,
@@ -11,6 +11,7 @@ import {
   Factory,
   Info,
   Link2,
+  LogIn,
   LogOut,
   Menu,
   PenLine,
@@ -46,7 +47,8 @@ const headings: Record<string, { title: string; kicker: string }> = {
 };
 
 interface AppShellProps {
-  user: User;
+  /** Null while signed out: the layout and navigation show, without data or account features. */
+  user: User | null;
   /** Active reminders whose time has come. */
   dueCount: number;
   children: React.ReactNode;
@@ -70,7 +72,7 @@ export function AppShell({ user, dueCount, children }: AppShellProps) {
   const health = useQuery({ queryKey: ["health"], queryFn: getHealth, refetchInterval: 30_000 });
   const heading = headings[location.pathname] ?? headings["/"];
   // The Overview greets the signed-in user in place of its page title.
-  const page = heading === headings["/"] ? { ...heading, title: greeting(user.display_name) } : heading;
+  const page = heading === headings["/"] && user ? { ...heading, title: greeting(user.display_name) } : heading;
 
   useEffect(() => {
     if (profileMenuOpen) firstMenuItemRef.current?.focus();
@@ -150,6 +152,15 @@ export function AppShell({ user, dueCount, children }: AppShellProps) {
         <div className="sidebar-bottom">
           <div className="sidebar-rule" />
           <div className="privacy-note"><ShieldCheck size={16} /><span>Track 1 course dataset<br /><small>No external actions enabled</small></span></div>
+          {user === null ? (
+            <div className="user-stub">
+              <div className="avatar">?</div>
+              <div className="user-identity"><strong>Guest</strong><small>Not signed in</small></div>
+              <RouterLink className="button button-lime button-small guest-sign-in" to="/signin" state={{ from: location.pathname }}>
+                <LogIn size={14} /> Sign in
+              </RouterLink>
+            </div>
+          ) : (
           <div className="user-stub">
             <div className="avatar">{initials(user)}</div>
             <div className="user-identity"><strong>{user.display_name || user.email}</strong><small>{user.display_name ? user.email : "Signed in"}</small></div>
@@ -205,6 +216,7 @@ export function AppShell({ user, dueCount, children }: AppShellProps) {
               )}
             </div>
           </div>
+          )}
         </div>
       </aside>
 
@@ -213,7 +225,7 @@ export function AppShell({ user, dueCount, children }: AppShellProps) {
           <button className="icon-button mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={20} /></button>
           <div className="topbar-title"><span>{page.kicker}</span><h1>{page.title}</h1></div>
           <div className="topbar-meta">
-            <NavLink
+            {user && <NavLink
               to="/reminders"
               className={`bell-button ${dueCount > 0 ? "has-due" : ""}`}
               aria-label={dueCount > 0 ? `${dueCount} reminder${dueCount > 1 ? "s" : ""} due` : "Reminders"}
@@ -221,7 +233,7 @@ export function AppShell({ user, dueCount, children }: AppShellProps) {
             >
               <Bell size={17} />
               {dueCount > 0 && <span className="bell-badge">{dueCount}</span>}
-            </NavLink>
+            </NavLink>}
             <div className={`connection-pill ${health.isError ? "offline" : ""}`}>
               <span className="connection-dot" />
               {health.isLoading ? "Connecting" : health.isError ? "API offline" : "API connected"}
@@ -232,7 +244,7 @@ export function AppShell({ user, dueCount, children }: AppShellProps) {
         <div className="page-content">{children}</div>
         <footer className="app-footer"><span>FIELDWORK OPERATIONS</span><span>Decision support · not a delivery guarantee</span></footer>
       </main>
-      {nameDialogOpen && <DisplayNameDialog user={user} onClose={() => setNameDialogOpen(false)} />}
+      {nameDialogOpen && user && <DisplayNameDialog user={user} onClose={() => setNameDialogOpen(false)} />}
       {demoInfoOpen && (
         <div className="dialog-scrim" onMouseDown={(event) => event.target === event.currentTarget && setDemoInfoOpen(false)}>
           <section className="demo-info-dialog" role="dialog" aria-modal="true" aria-labelledby="demo-info-title">

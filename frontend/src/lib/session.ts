@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import type { User } from "./api";
+import { setSessionActive, type User } from "./api";
 
 /**
  * Switch the signed-in user (null = signed out) and drop every other cached answer.
@@ -8,6 +8,7 @@ import type { User } from "./api";
  * observer that App renders from, and the page would never notice the new user.
  */
 export function switchUser(queryClient: QueryClient, user: User | null) {
+  setSessionActive(user !== null);
   queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "me" });
   queryClient.setQueryData(["me"], user);
 }
