@@ -185,15 +185,78 @@ From your phone on mobile data:
 
 ## Step 9: Keep it running
 
-**Deploying a new version:**
+### Updating the site to a new version
+
+A `git push` does not update the server by itself. Whenever new code is pushed, do the steps below on the VM. No reboot is needed; only the app restarts. `cloudflared` does not need a restart.
+
+**0. Back up the database (recommended).** Some updates add database columns automatically on startup. No data is lost, but keep a copy just in case:
 
 ```bash
 cd ~/copilot
-git pull
-.venv/bin/pip install -r backend/requirements.txt
-(cd frontend && npm ci && npm run build)   # 1 GB VM: build on your laptop and scp frontend/dist instead (Step 5)
-sudo systemctl restart copilot
+cp backend/.frontend-demo.sqlite3 ~/copilot-backup-$(date +%Y%m%d).sqlite3
 ```
+
+**1. Get the new code.**
+
+```bash
+cd ~/copilot
+git status              # should say "nothing to commit, working tree clean"
+git pull
+git log --oneline -1    # shows the commit you are now on
+```
+
+If `git status` lists files changed on the server, run `git stash` before `git pull`.
+
+**2. Update backend dependencies.** This is harmless when nothing changed:
+
+```bash
+.venv/bin/pip install -r backend/requirements.txt
+```
+
+**3. Rebuild the web app.** Skip this only if the update changed nothing under `frontend/`. Otherwise the site keeps showing the old pages.
+
+- **VM with 2 GB or more:**
+  ```bash
+  cd ~/copilot/frontend && npm ci && npm run build && cd ..
+  ```
+- **1 GB VM:** build on your laptop and upload it (as in Step 5):
+  ```bash
+  # on your laptop, in your clone of the repo
+  git pull
+  cd frontend && npm ci && npm run build && cd ..
+  scp -i <path-to>/ssh-key-copilot.key -r frontend/dist ubuntu@<PUBLIC_IP>:copilot/frontend/
+  ```
+
+**4. Restart the app.**
+
+```bash
+sudo systemctl restart copilot
+sudo systemctl status copilot --no-pager    # should say "active (running)"
+curl -s http://127.0.0.1:8000/health        # should return {"status":"ok"...}
+```
+
+If it does not start, read the log with `journalctl -u copilot -n 50 --no-pager`.
+
+**5. Check in the browser.** Open the site and press **Ctrl+F5**, so the browser does not show a cached old page. Then confirm that:
+- you can still sign in;
+- your existing accounts, chats and reminders are still there;
+- the new features are visible.
+
+**Never touch these three files during an update:** `deploy.env`, `backend/.ai-credentials.key` and `backend/.frontend-demo.sqlite3`. They are not in Git, so `git pull` leaves them alone; do not delete or replace them by hand.
+- Losing the key file means nobody's saved AI key can be decrypted.
+- Deleting the database removes every account.
+
+#### What to check after the Sprint 3 update (commit `fe3303e` or later)
+
+- **Signed out:** every page opens and shows a green *Sign in to see data and use the AI assistant* box instead of data.
+- **Signed in, Reminders page:**
+  - a *Suggested follow-ups* panel at the top;
+  - each reminder has a snooze button (⏰) and a *Repeat* option;
+  - *Export to calendar* downloads an `.ics` file.
+- **Top right:** a bell icon that shows a count when reminders are due.
+- **Desktop notifications** need HTTPS. Through the Cloudflare domain the site already uses HTTPS, so they work.
+
+### Backups and other upkeep
 
 **Backups:** copy these two files somewhere safe, for example from your laptop:
 
