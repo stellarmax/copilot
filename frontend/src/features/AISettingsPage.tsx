@@ -68,8 +68,9 @@ export function AISettingsPage() {
 
   const testConnection = useMutation({
     mutationFn: testAIConnection,
+    // Clear any earlier success note first; a failure is shown only in the red error box below.
+    onMutate: () => setNotice(""),
     onSuccess: (result) => setNotice(result.message),
-    onError: (error) => setNotice(error instanceof Error ? error.message : "Connection test failed."),
   });
 
   const deleteCredential = useMutation({

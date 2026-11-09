@@ -41,7 +41,9 @@ DECLINE = re.compile(
     r"does not (include|contain|have|track|record|support|cover|show)|don'?t have|do not have|"
     r"no (data|information|record|records|field|column|revenue|price|pricing|worker|complaint)|"
     r"not (in|part of) the (data|dataset|records)|cannot|can'?t|unable|not able|read-only|not supported|"
-    r"outside (the|my|what)|not tracked|not recorded|isn'?t recorded|no way to", re.I)
+    r"outside (the|my|what)|not tracked|not recorded|isn'?t recorded|no way to|"
+    r"won'?t (guess|speculate|estimate)|will not (guess|speculate|estimate)|(isn'?t|is not|not) a forecast|"
+    r"can'?t (predict|forecast)|cannot (predict|forecast)", re.I)
 ACTION_CLAIM = re.compile(
     r"\b(i|we)('ve| have)? (just )?(added|created|scheduled|sent|set up|set|logged|recorded|saved|"
     r"rescheduled|snoozed|moved|marked|completed|deleted|removed)\b|"
@@ -52,6 +54,8 @@ CURRENCY = re.compile(r"[$€£¥]\s?\d|\d[\d,.]*\s?(usd|sgd|dollars?)\b", re.I)
 PERSON_BLAME = re.compile(
     r"\b(caused by|responsible (was|is)|blamed? on|fault of)\s+[A-Z][a-z]+|\b(worker|operator|employee|supervisor)\s+(named\s+)?[A-Z][a-z]+")
 NUMBER = re.compile(r"(?<![\w\-/.])\d+(?:\.\d+)?(?![\w])")
+MONTH = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?"
+DAY_MONTH = re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+{MONTH}|\b{MONTH}\s+(\d{{1,2}})(?:st|nd|rd|th)?\b", re.I)
 
 
 # ---------------------------------------------------------------- helpers
@@ -65,6 +69,26 @@ def resolve(facts: dict, path: str) -> Any:
 def numbers_in(text: str) -> list[float]:
     text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", text)
     return [float(n) for n in NUMBER.findall(text)]
+
+
+def real_clock_dates(text: str, today=None) -> set[float]:
+    """Day numbers of calendar dates within two weeks of today, as in "Friday 13 Nov".
+
+    The system prompt gives the model the real-world clock so it can resolve "Friday" or
+    "tomorrow" for reminders. Such a date is expected output, not an invented number. Only
+    a day written next to its month and close to today is accepted, so a stray "13" is not.
+    """
+    from datetime import date, timedelta
+    today = today or date.today()
+    near = {(day.month, day.day) for day in (today + timedelta(days=offset) for offset in range(-1, 15))}
+    months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+    accepted = set()
+    for match in DAY_MONTH.finditer(text):
+        day = int(match.group(1) or match.group(4))
+        month = months.index((match.group(2) or match.group(3))[:3].lower()) + 1
+        if (month, day) in near:
+            accepted.add(float(day))
+    return accepted
 
 
 def number_present(value: float, found: list[float]) -> bool:
@@ -236,6 +260,7 @@ def score(question: dict, record: dict, facts: dict) -> dict:
     collect_numbers(question["question"], allowed)
     collect_numbers(record["model_visible_results"], allowed)
     collect_numbers(facts["_meta"]["as_of_date"], allowed)
+    allowed |= real_clock_dates(record["answer"])
     unsupported = sorted({n for n in numbers_in(record["answer"]) if n not in allowed})
     checks.append({"check": "grounded_numbers", "pass": not unsupported,
                    "detail": f"numbers not found in any tool result: {unsupported}" if unsupported else "every number traceable to a tool result"})

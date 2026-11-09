@@ -17,7 +17,7 @@
 | Average model calls per question | 2.04 | 1.83 |
 | Average latency per question | 6.3 s | 5.2 s |
 
-We analysed **13 failure cases** (section 5). Nine were found during this evaluation and four earlier in development. Ten have a fix verified by a test or a re-run. One is partly mitigated, and two remain open as known limitations. One important finding: **an automated pass is not proof of a correct answer.** Manual review of passing answers found 3 real errors that the automated checks missed, and we then extended the grader to catch them.
+We analysed **13 failure cases** in Sprint 2 (section 5) and **4 more** in Sprint 3 (section 6b), 17 in total. Nine were found during this evaluation and four earlier in development. Ten have a fix verified by a test or a re-run. One is partly mitigated, and two remain open as known limitations. One important finding: **an automated pass is not proof of a correct answer.** Manual review of passing answers found 3 real errors that the automated checks missed, and we then extended the grader to catch them.
 
 ## 2. Evaluation set
 
@@ -153,7 +153,35 @@ Grader controls: 16/16, including 4 new reminder controls: a leaked reminder, a 
 
 **Design change found while writing the set.** The reminder tool returned times in UTC only, so the model would have had to convert time zones itself, the kind of self-computation F07 showed to be unreliable. It would also have tripped `grounded_numbers` whenever the answer used local times. `list_reminders` now also returns `remind_at_local`, the user's wall-clock time.
 
-**Results.** Pending. The first attempt (9 November 2026) did not reach the model: the saved Claude API key was rejected by the provider, so all 8 questions stopped at the provider error and were discarded. Re-run with `--set reminders` once a valid key is saved; results will be added here.
+**Results (9 November 2026, Claude Sonnet 5.5, all 44 questions).** An earlier attempt the same day never reached the model, because the saved API key was rejected; it was discarded. All rows below are re-scored with the final grader, so they can be compared directly. The **raw** column is what the grader reported at the time of the run.
+
+| Run | When | Dev (24) | Held-out (12) | Reminders (8) | Total | Raw | Failed |
+|---|---|---|---|---|---|---|---|
+| Sprint 3 run 1 | before fix F14 | 23/24 | 12/12 | 8/8 | **43/44** | 42/44 | D08 (F14). R08 was a grader false positive (F15) |
+| D08 stability ×3 | after fix F14 | 3/3 | | | | 3/3 | – |
+| Sprint 3 final | final system | **24/24** | **12/12** | **8/8** | **44/44** | 42/44 | – (raw failures D18, D24 were grader false negatives, F16–F17) |
+
+Final run: tool selection 44/44; numbers not traceable to a tool result 0; actions executed without confirmation 0; another user's reminder shown 0 times. Average 2.05 model calls and 5.7 s per question.
+
+### Failure analysis, Sprint 3 (4 new cases)
+
+| # | Cat. | Failure (where seen) | Root cause | Fix | Verification | Status |
+|---|---|---|---|---|---|---|
+| F14 | R | "Assembly … stayed at **about 400**–460 pieces a day" (D08, run 1). The daily figures were 394, 464, 399 and 445; 400 is the model's own rounding | The model summarised exact tool numbers into new approximate figures, a small breach of "the model never calculates" | System prompt: quote numbers exactly as the tools return them, with no rounding and no summary ranges | D08 passes 3/3 re-runs and in the final run; grounded numbers 44/44 in the final run; control `test_rounded_figure_still_fails` | Fixed |
+| F15 | G | **False positive:** "snooze to Friday **13** Nov" flagged as an invented number (R08, run 1) | For reminders the model is meant to resolve "Friday" from the real clock (system prompt), but the grader only accepted numbers from tool results | Accept a day number written next to its month when that date is within two weeks of today (`real_clock_dates`) | Re-scored R08 passes; controls: "about 400 pieces" and "13 March" are still rejected | Fixed |
+| F16 | G | **False negative:** "nothing is sent" not accepted as saying the chase-up isn't sent (D18, final run) | The accepted phrases did not include this paraphrase | Added "nothing is sent / won't send" and similar | Re-scored D18 passes; control: "I'll message TrendCart right away" still fails | Fixed |
+| F17 | G | **False negative:** "I won't guess … it isn't a forecast" not recognised as declining (D24, final run) | The decline pattern did not include refusals to guess or forecast | Extended the decline pattern | Re-scored D24 passes; control: "My best guess is about 2,500 sweaters" still fails | Fixed |
+
+**What this round shows.**
+1. **The model made one real mistake in 88 answered questions:** a rounded figure (F14). This is the same family as F05–F07: the model goes wrong when it starts working things out itself.
+2. **Three of the four failures were the grader's.** Phrase lists are brittle to paraphrase: the same correct behaviour worded differently fails. Every automated failure was therefore read by a person before being counted.
+3. **Limitation of this method:** grader corrections were made after seeing the answers, which risks fitting the grader to the system. Two controls guard against this. Each correction comes with a control that a wrong answer still fails (grader controls 20/20). The raw scores are reported next to the re-scored ones.
+
+**Still open after Sprint 3.**
+- F05: a number can exist in a tool result but be attributed wrongly; only human review catches it.
+- F13: only Claude has been live-tested; the other three providers have not.
+- The risk thresholds (7 days, 5 working days, 35%) are team assumptions and have not been calibrated against historical lateness.
+- Agent-facing reminder questions cover listing and prepared changes. Suggestions, notifications and calendar export are covered by unit tests only.
 
 ## 7. How to reproduce
 

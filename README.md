@@ -25,7 +25,7 @@ An operations assistant for the general manager of SweaterCo, a sweater factory.
 | `data/` | Course-provided dataset (orders, production log, workshops); the app's default data |
 | `demo_data/` | Small fixture dataset used by the automated tests |
 | `evaluation/` | 36-question evaluation set plus 8 Sprint 3 reminder questions, independent answer key, runner and failure analysis (run logs are generated locally) |
-| `docs/` | Local setup guides (EN/ZH) and deployment guides (Cloudflare Tunnel on your PC; Oracle Cloud VM) |
+| `docs/` | Local setup guides (EN/ZH) and deployment guides (Cloudflare Tunnel on your PC; Oracle Cloud VM; updating the Google Cloud VM) |
 | `scripts/` | Production start script |
 
 ## Run locally (development)

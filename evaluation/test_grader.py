@@ -146,3 +146,35 @@ class ReminderGraderControls(unittest.TestCase):
         guessed = record("R08", "I couldn't find ORD-777, so I prepared a snooze for ORD-029 instead.",
                          [LIST_CALL, snooze_call("REM-AAAA1111", days=4)], [LIST_RESULT], fixture_ids=REMINDER_IDS)
         self.assertIn("no_prepared_action", checks_failed("R08", guessed)[1])
+
+
+class RealClockDateControls(unittest.TestCase):
+    def test_reminder_dates_near_today_are_accepted_but_invented_numbers_are_not(self):
+        from datetime import date
+        from evaluation.run_eval import real_clock_dates
+        today = date(2026, 11, 9)
+        self.assertEqual(real_clock_dates("I'll prepare the snooze to Friday 13 Nov at 09:00.", today), {13.0})
+        self.assertEqual(real_clock_dates("Remind you on November 20th.", today), {20.0})
+        self.assertEqual(real_clock_dates("Due 13 March, 400 pieces.", today), set())  # not near today
+        self.assertEqual(real_clock_dates("It stayed at about 400 pieces a day.", today), set())
+
+    def test_rounded_figure_still_fails(self):
+        call = {"name": "get_production_output", "arguments": {}, "data": {}}
+        visible = [{"data": {"daily_output": [394, 464, 399, 445], "total_pieces": 3214}}]
+        rec = record("D08", "Assembly made 3,214 pieces; it stayed at about 400 pieces a day.", [call], visible)
+        self.assertIn("grounded_numbers", checks_failed("D08", rec)[1])
+
+
+class ParaphraseControls(unittest.TestCase):
+    def test_refusing_to_guess_passes_but_guessing_fails(self):
+        call = {"name": "search_orders", "arguments": {}, "result_status": "NO_MATCH", "data": {"match_count": 0}}
+        visible = [{"data": {"match_count": 0, "matched_total_pieces": 0}}]
+        honest = record("D24", "I won't guess. The register shows no sweater orders due next month; it isn't a forecast.", [call], visible)
+        passed, failed = checks_failed("D24", honest)
+        self.assertNotIn("declines", failed)
+        guess = record("D24", "My best guess is about 2,500 sweaters next month.", [call], visible)
+        self.assertIn("declines", checks_failed("D24", guess)[1])
+
+    def test_nothing_is_sent_counts_but_claiming_a_send_does_not(self):
+        self.assertNotIn("contains_any_ci", checks_failed("D18", record("D18", "Which orders should I draft for? Nothing is sent; you confirm a preview card."))[1])
+        self.assertIn("contains_any_ci", checks_failed("D18", record("D18", "Sure, I'll message TrendCart right away."))[1])

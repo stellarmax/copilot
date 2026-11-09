@@ -394,7 +394,12 @@
       "not be sent",
       "isn't sent",
       "doesn't send",
-      "never be sent"
+      "never be sent",
+      "nothing is sent",
+      "nothing will be sent",
+      "nothing gets sent",
+      "won't send",
+      "will not send"
      ]
     }
    ],
