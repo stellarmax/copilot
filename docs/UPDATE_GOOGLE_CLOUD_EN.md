@@ -178,11 +178,10 @@ Open the site in a browser and press **Ctrl+F5**, so it does not show a cached o
 
 - [ ] You can sign in, and existing accounts, chats and reminders are still there.
 - [ ] **Signed out**, every page opens and shows a green *Sign in to see data and use the AI assistant* box instead of data.
-- [ ] **Reminders page** (signed in):
-  - a *Suggested follow-ups* panel at the top;
-  - a snooze button (⏰) on each reminder and a *Repeat* option;
-  - *Export to calendar* downloads an `.ics` file.
-- [ ] A bell icon at the top right shows a count when reminders are due.
+- [ ] **Create an account** has no *Invite code* field any more, and a new account can be registered with just an e-mail and a password.
+- [ ] On **Overview**, *Generate morning brief* shows a green **Morning brief ready** notification at the top of the screen.
+- [ ] Open any **Evidence** link and click *Re-verify claim*: a **Re-verified: consistent** notification appears.
+- [ ] **Reminders page** (signed in): a *Suggested follow-ups* panel, snooze (⏰) and *Repeat* on each reminder, and *Export to calendar* downloads an `.ics` file.
 - [ ] *Turn on desktop notifications* works. This needs the site to be opened over **https://**. Through a Cloudflare domain it is; through a plain `http://<external-IP>` address, browsers block notifications.
 
 ---
