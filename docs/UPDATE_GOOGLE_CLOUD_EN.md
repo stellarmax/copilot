@@ -193,7 +193,7 @@ These are not in Git, so `git pull` leaves them alone. Do not delete, replace or
 
 | File | What it is | If it is lost |
 |---|---|---|
-| `deploy.env` | Invite code and settings | The app refuses to start until it is recreated |
+| `deploy.env` | Optional settings (Cloudflare Access) | The service's `EnvironmentFile=` line fails; recreate it from `deploy.env.example` |
 | `backend/.ai-credentials.key` | Master key that encrypts everyone's saved AI keys | Nobody's saved AI key can be decrypted; everyone must re-enter their key |
 | `backend/.frontend-demo.sqlite3` | The database: accounts, chats, reminders, action log | Every account and all user data is gone (restore from the Step 3 backup) |
 
@@ -211,7 +211,6 @@ gcloud compute scp <INSTANCE_NAME>:<APP_FOLDER>/backend/.ai-credentials.key . --
 | The site still looks old after the update | The web app was not rebuilt (Step 6), or the browser cached it: press Ctrl+F5 |
 | New features show **Not Found** or **Method Not Allowed** | The old backend process is still running: restart it (Step 7) and check that only one `uvicorn` process exists (`ps aux \| grep uvicorn`) |
 | Log says **frontend/dist is missing** | Build or upload the web app (Step 6) |
-| Log says **Set COPILOT_INVITE_CODE** | The app was started without `deploy.env`; load it as in Step 7B, or check `EnvironmentFile=` in the service |
 | Log says **Address already in use** | An old process still holds port 8000: `pkill -f "uvicorn backend.serve:app"`, then start again |
 | `npm run build` prints **Killed** | Out of memory: build on your laptop (Step 6, 1 GB route) |
 | Browser shows **502 Bad Gateway** | The app is not running: check Step 7 |

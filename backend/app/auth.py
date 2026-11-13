@@ -1,4 +1,4 @@
-"""Accounts for the web app: session cookies, login throttling and invite-only registration.
+"""Accounts for the web app: open registration, session cookies and login throttling.
 
 Every /api/v1 endpoint except /api/v1/auth/* requires a signed-in user. Each user's AI key, chats,
 memories, reminders and action log are private to them; the factory data is shared and read-only.
@@ -6,9 +6,6 @@ memories, reminders and action log are private to them; the factory data is shar
 
 from __future__ import annotations
 
-import hmac
-import ipaddress
-import os
 import time
 from collections import defaultdict, deque
 
@@ -20,32 +17,7 @@ from backend.app.agent.store import SESSION_DAYS, AgentStore
 
 SESSION_COOKIE = "copilot_session"
 PUBLIC_API_PREFIX = "/api/v1/auth/"
-LOCAL_HOST_NAMES = {"127.0.0.1", "localhost", "[::1]"}
 MAX_FAILURES, FAILURE_WINDOW_SECONDS = 5, 15 * 60
-
-
-def is_local_request(request: Request) -> bool:
-    """True only for a browser on this computer: loopback client *and* a localhost Host header.
-
-    A Cloudflare Tunnel also connects from 127.0.0.1, but it keeps the public Host header.
-    """
-    host = request.client.host if request.client else ""
-    try:
-        loopback = ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        loopback = False
-    host_name = (request.headers.get("host") or "").rsplit(":", 1)[0].lower()
-    return loopback and host_name in LOCAL_HOST_NAMES
-
-
-def check_invite(request: Request, code: str | None) -> None:
-    expected = os.getenv("COPILOT_INVITE_CODE", "")
-    if expected:
-        if not code or not hmac.compare_digest(code.strip(), expected):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="The invite code is not valid.")
-    elif not is_local_request(request):
-        # Without a configured invite code, accounts can only be created on the host computer.
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registration is closed.")
 
 
 class LoginThrottle:

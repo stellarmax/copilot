@@ -14,7 +14,7 @@ An operations assistant for the general manager of SweaterCo, a sweater factory.
 | Orders / Production / Feasibility | Order search, factory-wide output with missing days flagged, new-order feasibility with outsourcing options |
 | AI chat | Answers through 9 allowlisted tools; every number comes from the core and links to re-verifiable evidence; actions are prepared, never executed, until you click **Confirm** |
 | Reminders | Risk-based follow-up suggestions with evidence; snooze and daily/weekly repeat; each reminder shows its order's stage, risk and days to due date; bell count and desktop notifications while the app is open; `.ics` calendar export; manage reminders from the chat |
-| Accounts | E-mail sign-in with invite-only registration. Each account uses its own AI key; chats, memories, reminders and the action log are private. Signed out, every page opens without data or AI |
+| Accounts | E-mail sign-in; anyone can register. Each account uses its own AI key; chats, memories, reminders and the action log are private. Signed out, every page opens without data or AI |
 
 ## Repository layout
 
@@ -44,7 +44,7 @@ npm ci
 npm run dev
 ```
 
-Open <http://127.0.0.1:5173> and create an account (no invite code is needed on the host computer). To use the AI chat, add your own API key under **AI settings**. Each account's key is stored encrypted in a local, git-ignored database and is used only for that account.
+Open <http://127.0.0.1:5173> and create an account. To use the AI chat, add your own API key under **AI settings**. Each account's key is stored encrypted in a local, git-ignored database and is used only for that account.
 
 ## Tests and evaluation
 
@@ -59,7 +59,7 @@ Results and the failure analysis are in `evaluation/EVALUATION_REPORT.md`.
 
 ## Deploy on your own domain
 
-The app runs on one computer and is published through **Cloudflare Tunnel**. Everyone signs in with their own account; new accounts need the team invite code (`COPILOT_INVITE_CODE`), and each person uses their own AI key. Factory data is shared and read-only; chats, memories, reminders and the action log are private per account. Cloudflare Access can be added as an optional second gate. See `docs/DEPLOY_CLOUDFLARE_ZH.md`.
+The app runs on one computer and is published through **Cloudflare Tunnel**. Everyone signs in with their own account; anyone can create an account, and each person uses their own AI key. Factory data is shared and read-only; chats, memories, reminders and the action log are private per account. Cloudflare Access can be added as an optional gate. See `docs/DEPLOY_CLOUDFLARE_ZH.md`.
 
 ## Never committed
 

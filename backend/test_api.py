@@ -241,15 +241,13 @@ class BackendApiTests(IsolatedAsyncioTestCase):
         blocked = await fresh.post("/api/v1/auth/login", json={"email": "manager@example.com", "password": "correct horse 1"})
         self.assertEqual(blocked.status_code, 429)
 
-    async def test_registration_needs_invite_code_unless_local(self):
-        tunnel = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://copilot.example.com")
-        self.clients.append(tunnel)
-        body = {"email": "stranger@example.com", "password": "long enough 1"}
-        self.assertEqual((await tunnel.post("/api/v1/auth/register", json=body)).status_code, 403)
-        with patch.dict(os.environ, {"COPILOT_INVITE_CODE": "team-secret-16"}):
-            self.assertEqual((await tunnel.post("/api/v1/auth/register", json={**body, "invite_code": "guess"})).status_code, 403)
-            ok = await tunnel.post("/api/v1/auth/register", json={**body, "invite_code": "team-secret-16"})
-            self.assertEqual(ok.status_code, 200)
+    async def test_anyone_can_register_on_the_public_site(self):
+        public = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://copilot.example.com")
+        self.clients.append(public)
+        body = {"email": "visitor@example.com", "password": "long enough 1"}
+        self.assertEqual((await public.post("/api/v1/auth/register", json=body)).status_code, 200)
+        self.assertEqual((await public.get("/api/v1/auth/me")).json()["email"], "visitor@example.com")
+        self.assertEqual((await public.post("/api/v1/auth/register", json=body)).status_code, 409)
 
     async def test_each_user_sees_only_their_own_key_chats_and_reminders(self):
         from datetime import datetime, timedelta, timezone

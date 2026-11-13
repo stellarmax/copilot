@@ -1,18 +1,16 @@
 # Start the public (Cloudflare Tunnel) deployment on this computer.
 # Usage (from the project root):   powershell -ExecutionPolicy Bypass -File scripts\start-production.ps1
-# Reads the invite code (and optional Cloudflare Access settings) from deploy.env, builds the web app,
+# Reads optional settings (Cloudflare Access) from deploy.env if it exists, builds the web app,
 # then serves everything on http://127.0.0.1:8000 for cloudflared to forward. Stop with Ctrl+C.
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-if (-not (Test-Path "deploy.env")) {
-    Write-Host "deploy.env not found. Copy deploy.env.example to deploy.env and set COPILOT_INVITE_CODE." -ForegroundColor Red
-    exit 1
-}
-foreach ($line in Get-Content "deploy.env") {
-    if ($line -match '^\s*([A-Z_]+)\s*=\s*(.+?)\s*$') { Set-Item -Path "Env:$($Matches[1])" -Value $Matches[2] }
+if (Test-Path "deploy.env") {
+    foreach ($line in Get-Content "deploy.env") {
+        if ($line -match '^\s*([A-Z_]+)\s*=\s*(.+?)\s*$') { Set-Item -Path "Env:$($Matches[1])" -Value $Matches[2] }
+    }
 }
 
 if (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue) {

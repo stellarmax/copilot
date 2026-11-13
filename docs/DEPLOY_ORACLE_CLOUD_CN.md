@@ -14,7 +14,6 @@
 - SSH 客户端：Windows 用 PowerShell 自带的 `ssh`，Mac 用"终端"。
 - GitHub 仓库 `stellarmax/copilot` 的读取权限。仓库要是带账号系统的版本，也就是包含 `backend/app/auth.py`。
 - 管理我们域名的 Cloudflare 账号权限，或者请有权限的人帮你做第 7 步。
-- 一个网站邀请码：至少 8 个字符，和组员约定好。
 
 ---
 
@@ -116,7 +115,7 @@ cd ..
 
 ```bash
 cp deploy.env.example deploy.env
-nano deploy.env        # 设置 COPILOT_INVITE_CODE=<团队邀请码>；两行 CF_ACCESS_* 留空
+nano deploy.env        # 不用 Cloudflare Access 的话，两行 CF_ACCESS_* 留空
 chmod 600 deploy.env
 ```
 
@@ -188,10 +187,10 @@ curl -s http://127.0.0.1:8000/health
 
 用手机流量（不要连 Wi-Fi）：
 1. 打开 `https://copilot.<我们的域名>`，应该出现 **Sign in** 登录页。
-2. 点 **Create an account** 注册，不填邀请码或者填错邀请码，必须被拒绝。
-3. 用正确的邀请码注册，然后打开 **AI settings**，填入**你自己的** API key，点 **Test connection**。
+2. 点 **Create an account**，用邮箱和密码注册（不需要邀请码）。
+3. 打开 **AI settings**，填入**你自己的** API key，点 **Test connection**。
 4. 再注册一个测试账号。这个账号**不能**看到第一个账号的 key 状态、聊天、提醒和动作记录。
-5. 把网址和邀请码发给组员。每个人自己注册、填自己的 key。
+5. 把网址发给组员。每个人自己注册、填自己的 key。
 
 ## 第 9 步：日常维护
 
@@ -216,8 +215,6 @@ scp -i ssh-key-copilot.key ubuntu@<公网IP>:copilot/backend/.ai-credentials.key
 
 **闲置回收：** 如果免费虚拟机连续 7 天几乎闲置（CPU、网络、内存使用都很低），Oracle 可能会把它停掉。网站突然打不开时，先去控制台看看实例状态，必要时重新启动。把账号升级为 *Pay As You Go* 就不会被回收，而且 Always Free 范围内的资源仍然免费。
 
-**更换邀请码：** 修改 `deploy.env`，然后执行 `sudo systemctl restart copilot`。已有账号不受影响。
-
 ---
 
 ## 常见问题
@@ -225,7 +222,6 @@ scp -i ssh-key-copilot.key ubuntu@<公网IP>:copilot/backend/.ai-credentials.key
 | 现象 | 原因 / 解决办法 |
 |---|---|
 | `copilot.service` 启动失败，日志显示 **frontend/dist is missing** | 网页还没打包。执行 `cd frontend && npm ci && npm run build`；1 GB 机器在笔记本上打包后上传。然后重启服务。 |
-| 日志显示 **Set COPILOT_INVITE_CODE** | `deploy.env` 里没有邀请码，或者邀请码不足 8 个字符。 |
 | 浏览器显示 **502 Bad Gateway** | Tunnel 已连上，但项目没在运行。用 `sudo systemctl status copilot` 检查。 |
 | 浏览器显示 Cloudflare **1033** 错误 | 虚拟机上的 `cloudflared` 没连上。用 `sudo systemctl status cloudflared` 检查。 |
 | `git clone` 提示 **Permission denied (publickey)** | 虚拟机的 Deploy key 还没加到仓库里（见第 4 步）。 |

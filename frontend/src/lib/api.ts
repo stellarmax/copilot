@@ -365,7 +365,7 @@ export function signIn(input: { email: string; password: string }) {
   return apiFetch<User>("/api/v1/auth/login", { method: "POST", body: JSON.stringify(input) });
 }
 
-export function register(input: { email: string; password: string; display_name: string; invite_code?: string }) {
+export function register(input: { email: string; password: string; display_name: string }) {
   return apiFetch<User>("/api/v1/auth/register", { method: "POST", body: JSON.stringify(input) });
 }
 

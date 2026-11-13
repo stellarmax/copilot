@@ -11,8 +11,7 @@ The VM never needs open inbound ports: `cloudflared` makes an outbound connectio
 **Before you start, you need:**
 - an SSH client (`ssh` in Windows PowerShell or the macOS Terminal);
 - read access to the GitHub repo `stellarmax/copilot`, with the version that includes accounts (it contains `backend/app/auth.py`);
-- access to the Cloudflare account that manages our domain, or someone who can do Step 6 for you;
-- an invite code for the site, at least 8 characters, agreed with the team.
+- access to the Cloudflare account that manages our domain, or someone who can do Step 6 for you.
 
 ---
 
@@ -112,7 +111,7 @@ cd ..
 
 ```bash
 cp deploy.env.example deploy.env
-nano deploy.env        # set COPILOT_INVITE_CODE=<the team's code>; leave both CF_ACCESS_* lines empty
+nano deploy.env        # leave both CF_ACCESS_* lines empty unless you use Cloudflare Access
 chmod 600 deploy.env
 ```
 
@@ -178,10 +177,10 @@ Do this in the Cloudflare dashboard of the account that owns our domain. If you 
 
 From your phone on mobile data:
 1. Open `https://copilot.<our-domain>`. The **Sign in** page should appear.
-2. **Create an account** without the invite code or with a wrong one. It must be refused.
-3. Register with the correct invite code, then open **AI settings**, add **your own** API key, and click **Test connection**.
+2. Click **Create an account** and register with an e-mail and a password (no invite code is needed).
+3. Open **AI settings**, add **your own** API key, and click **Test connection**.
 4. Register a second test account. It must **not** see the first account's key status, chats, reminders or action log.
-5. Share the URL and the invite code with the team. Each person registers and adds their own key.
+5. Share the URL with the team. Each person registers and adds their own key.
 
 ## Step 9: Keep it running
 
@@ -269,8 +268,6 @@ If `.ai-credentials.key` is lost, saved AI keys can't be decrypted and everyone 
 
 **Idle reclamation:** Oracle may stop Always Free VMs that stay almost idle (very low CPU, network and memory use over 7 days). If the site suddenly disappears, check the instance state in the console and start it again. Upgrading the account to *Pay As You Go* removes this rule, and Always Free resources stay free.
 
-**Changing the invite code:** edit `deploy.env`, then run `sudo systemctl restart copilot`. Existing accounts keep working.
-
 ---
 
 ## Troubleshooting
@@ -278,7 +275,6 @@ If `.ai-credentials.key` is lost, saved AI keys can't be decrypted and everyone 
 | Symptom | Likely cause / fix |
 |---|---|
 | `copilot.service` fails, log says **frontend/dist is missing** | Run `cd frontend && npm ci && npm run build`, then restart. |
-| Log says **Set COPILOT_INVITE_CODE** | `deploy.env` is missing the code, or the code is shorter than 8 characters. |
 | Browser shows **502 Bad Gateway** | The tunnel is up but the app isn't running. Check `sudo systemctl status copilot`. |
 | Browser shows a Cloudflare **1033** error | `cloudflared` on the VM is not connected. Check `sudo systemctl status cloudflared`. |
 | `git clone` says **Permission denied (publickey)** | The VM's deploy key hasn't been added to the repo yet (Step 4). |

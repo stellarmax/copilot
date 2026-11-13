@@ -16,11 +16,10 @@ export function SignInPage({ signedIn, onSignedIn }: { signedIn: boolean; onSign
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
   const submit = useMutation({
     mutationFn: () => mode === "sign-in"
       ? signIn({ email, password })
-      : register({ email, password, display_name: displayName, invite_code: inviteCode || undefined }),
+      : register({ email, password, display_name: displayName }),
     onSuccess: (user) => {
       leaving.current = true;
       // A new account has no AI key yet: start on AI settings with a welcome note.
@@ -72,11 +71,6 @@ export function SignInPage({ signedIn, onSignedIn }: { signedIn: boolean; onSign
               onChange={(event) => setPassword(event.target.value)}
             />
           </label>
-          {registering && (
-            <label>Invite code <small>from your team; not needed on the host computer</small>
-              <input autoComplete="off" value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} />
-            </label>
-          )}
           {submit.error && <ErrorState message={submit.error.message} />}
           <button className="button button-primary button-wide" type="submit" disabled={submit.isPending}>
             {registering ? <UserPlus size={15} /> : <LogIn size={15} />}

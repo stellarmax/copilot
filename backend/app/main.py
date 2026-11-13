@@ -28,7 +28,6 @@ from backend.app.agent.store import AgentStore
 from backend.app.auth import (
     LoginThrottle,
     SessionMiddleware,
-    check_invite,
     clear_session_cookie,
     current_user,
     set_session_cookie,
@@ -104,7 +103,6 @@ class RegisterRequest(StrictRequest):
     email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=8, max_length=200)
     display_name: str = Field(default="", max_length=60)
-    invite_code: str | None = Field(default=None, max_length=200)
 
 
 class LoginRequest(StrictRequest):
@@ -355,7 +353,6 @@ def create_app(
     @app.post("/api/v1/auth/register", tags=["auth"])
     def register(payload: RegisterRequest, request: Request, response: Response,
                  store: AgentStore = Depends(get_agent_store)) -> dict[str, str]:
-        check_invite(request, payload.invite_code)
         email = payload.email.strip().lower()
         if not EMAIL_RE.match(email):
             raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail="Enter a valid e-mail address.")
