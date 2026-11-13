@@ -637,3 +637,21 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .sign-in-notice + .notice-strip, .sign-in-notice + .error-state { margin-top: 12px; }
 .page-intro > .button { flex: 0 0 auto; white-space: nowrap; }
 a.button { text-decoration: none; }
+
+/* Success notifications (morning brief, re-verify) */
+.toast-stack { position: fixed; top: 18px; left: 50%; z-index: 70; display: flex; flex-direction: column; align-items: center; gap: 10px; transform: translateX(-50%); pointer-events: none; }
+.toast { width: min(360px, calc(100vw - 32px)); position: relative; display: flex; align-items: flex-start; gap: 11px; overflow: hidden; padding: 13px 12px 15px 13px; border: 1px solid #cfe0c9; border-radius: 8px; color: var(--ink-deep); background: var(--paper); box-shadow: 0 14px 34px rgb(8 25 19 / 20%); pointer-events: auto; animation: toast-in 320ms cubic-bezier(.2,.9,.3,1.25) both; }
+.toast-warning { border-color: #f0d2c9; }
+.toast-icon { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 50%; color: var(--ink-deep); background: var(--lime); animation: toast-pop 420ms 120ms cubic-bezier(.2,.9,.3,1.6) both; }
+.toast-warning .toast-icon { color: #fff; background: var(--coral); }
+.toast-copy { min-width: 0; flex: 1; }
+.toast-copy strong { display: block; font-size: 13.5px; }
+.toast-copy p { margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.toast-close { flex: none; display: grid; place-items: center; padding: 3px; border: 0; border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; }
+.toast-close:hover { color: var(--ink-deep); background: var(--canvas); }
+.toast-timer { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--lime-deep); transform-origin: left; animation: toast-timer linear both; }
+.toast-warning .toast-timer { background: var(--coral); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-14px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes toast-pop { from { transform: scale(0); } to { transform: scale(1); } }
+@keyframes toast-timer { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@media (max-width: 600px) { .toast-stack { top: 12px; left: 16px; right: 16px; align-items: stretch; transform: none; } .toast { width: auto; } }

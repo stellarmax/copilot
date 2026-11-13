@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronRight, CircleAlert, RefreshCw, X } from "lucide-react";
 import { getClaim, verifyClaim } from "../lib/api";
 import { ErrorState, LoadingState } from "./Feedback";
+import { showToast } from "./Toaster";
 
 interface TraceDrawerProps {
   claimId: string | null;
@@ -21,7 +22,14 @@ export function TraceDrawer({ claimId, onClose }: TraceDrawerProps) {
   });
   const verify = useMutation({
     mutationFn: () => verifyClaim(claimId!),
-    onSuccess: (result) => queryClient.setQueryData(["claim", claimId], result),
+    onSuccess: (result) => {
+      queryClient.setQueryData(["claim", claimId], result);
+      if (result.verification?.result === "CONSISTENT") {
+        showToast({ title: "Re-verified: consistent", detail: "Recomputed from the source files; the result matches the stored claim." });
+      } else {
+        showToast({ tone: "warning", title: `Re-verified: ${result.verification?.result ?? "checked"}`, detail: result.verification?.likely_cause ?? "The recomputed result differs from the stored claim." });
+      }
+    },
   });
 
   if (!claimId) return null;

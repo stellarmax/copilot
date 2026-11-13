@@ -4,6 +4,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-
 import { AppShell } from "./components/AppShell";
 import { ReminderNotifier } from "./components/ReminderNotifier";
 import { TraceDrawer } from "./components/TraceDrawer";
+import { Toaster } from "./components/Toaster";
 import { AISettingsPage } from "./features/AISettingsPage";
 import { ChatPage } from "./features/ChatPage";
 import { AuditPage } from "./features/AuditPage";
@@ -61,6 +62,7 @@ function Workspace({ user }: { user: User | null }) {
           <Route path="*" element={<Navigate to="/chat" replace />} />
         </Routes>
         <TraceDrawer claimId={claimId} onClose={() => setClaimId(null)} />
+        <Toaster />
       </>
     );
   }
@@ -81,6 +83,7 @@ function Workspace({ user }: { user: User | null }) {
         </Routes>
       </AppShell>
       <TraceDrawer claimId={claimId} onClose={() => setClaimId(null)} />
+      <Toaster />
     </>
   );
 }

@@ -5,6 +5,7 @@ import { ArrowDownRight, ArrowRight, ArrowUpRight, BellRing, CalendarDays, Circl
 import { ClaimBadge } from "../components/ClaimBadge";
 import { ChatEntry } from "../components/ChatEntry";
 import { ErrorState, InlineError, LoadingState } from "../components/Feedback";
+import { showToast } from "../components/Toaster";
 import { generateBrief, getOrders, getProduction, getReminders, type BriefData, type BriefFinding, type Reminder } from "../lib/api";
 import { DUE_LABELS, formatWhen } from "../lib/reminders";
 
@@ -98,6 +99,11 @@ export function OverviewPage({ onTrace, onAsk }: OverviewPageProps) {
     onSuccess: (response) => {
       setBrief(response.data);
       setBriefReminders(response.my_reminders ?? []);
+      const { published_count: priorities, observation_count: observations } = response.data.overview;
+      showToast({
+        title: "Morning brief ready",
+        detail: `${priorities} ${priorities === 1 ? "priority" : "priorities"} and ${observations} in observation, checked against today's data.`,
+      });
     },
   });
   const orderData = orders.data?.data;
